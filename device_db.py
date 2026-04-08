@@ -24,6 +24,7 @@ def _init_tables(conn):
         CREATE TABLE IF NOT EXISTS devices (
             mac TEXT PRIMARY KEY,
             ip TEXT,
+            hostname TEXT DEFAULT '',
             custom_name TEXT DEFAULT '',
             manufacturer TEXT DEFAULT 'Unknown',
             device_type TEXT DEFAULT 'Unknown',
@@ -41,26 +42,32 @@ def _init_tables(conn):
         CREATE INDEX IF NOT EXISTS idx_activity_ts ON activity_log(timestamp DESC);
         CREATE INDEX IF NOT EXISTS idx_activity_mac ON activity_log(mac);
     """)
+    # Migrate: add hostname column if missing
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(devices)").fetchall()]
+    if "hostname" not in cols:
+        conn.execute("ALTER TABLE devices ADD COLUMN hostname TEXT DEFAULT ''")
 
 
-def upsert_device(mac, ip, manufacturer="Unknown", device_type="Unknown"):
+def upsert_device(mac, ip, manufacturer="Unknown", device_type="Unknown", hostname=""):
     conn = _get_conn()
     now = datetime.now().isoformat()
     row = conn.execute("SELECT * FROM devices WHERE mac = ?", (mac,)).fetchone()
     if row is None:
         conn.execute(
-            "INSERT INTO devices (mac, ip, manufacturer, device_type, first_seen, last_seen, is_active) "
-            "VALUES (?, ?, ?, ?, ?, ?, 1)",
-            (mac, ip, manufacturer, device_type, now, now),
+            "INSERT INTO devices (mac, ip, hostname, manufacturer, device_type, first_seen, last_seen, is_active) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 1)",
+            (mac, ip, hostname, manufacturer, device_type, now, now),
         )
         conn.commit()
         return True  # new device
     else:
         conn.execute(
-            "UPDATE devices SET ip = ?, manufacturer = CASE WHEN ? != 'Unknown' THEN ? ELSE manufacturer END, "
+            "UPDATE devices SET ip = ?, "
+            "hostname = CASE WHEN ? != '' THEN ? ELSE hostname END, "
+            "manufacturer = CASE WHEN ? != 'Unknown' THEN ? ELSE manufacturer END, "
             "device_type = CASE WHEN ? != 'Unknown' THEN ? ELSE device_type END, "
             "last_seen = ?, is_active = 1 WHERE mac = ?",
-            (ip, manufacturer, manufacturer, device_type, device_type, now, mac),
+            (ip, hostname, hostname, manufacturer, manufacturer, device_type, device_type, now, mac),
         )
         conn.commit()
         return False  # existing device

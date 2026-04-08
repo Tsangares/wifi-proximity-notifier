@@ -18,7 +18,7 @@ pip install -r requirements.txt
 
 # Install systemd service
 echo "[3/4] Installing systemd service..."
-sudo cp "$SCRIPT_DIR/wifi-notifier.service" /etc/systemd/system/
+sudo ln -sf "$SCRIPT_DIR/wifi-notifier.service" /etc/systemd/system/wifi-notifier.service
 sudo systemctl daemon-reload
 
 # Enable service

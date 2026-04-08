@@ -57,7 +57,7 @@
 <h2>Active Devices</h2>
 <table id="active-table">
   <thead><tr>
-    <th></th><th>Name</th><th>Type</th><th>Manufacturer</th><th>MAC</th><th>IP</th><th>First Seen</th><th>Last Seen</th>
+    <th></th><th>Name</th><th>Hostname</th><th>Type</th><th>Manufacturer</th><th>MAC</th><th>IP</th><th>First Seen</th><th>Last Seen</th>
   </tr></thead>
   <tbody id="active-body"></tbody>
 </table>
@@ -65,7 +65,7 @@
 <h2>Past Devices</h2>
 <table id="inactive-table">
   <thead><tr>
-    <th></th><th>Name</th><th>Type</th><th>Manufacturer</th><th>MAC</th><th>IP</th><th>First Seen</th><th>Last Seen</th>
+    <th></th><th>Name</th><th>Hostname</th><th>Type</th><th>Manufacturer</th><th>MAC</th><th>IP</th><th>First Seen</th><th>Last Seen</th>
   </tr></thead>
   <tbody id="inactive-body"></tbody>
 </table>
@@ -104,6 +104,7 @@ function deviceRow(d, active) {
   return `<tr>
     <td>${dot}</td>
     <td>${name}</td>
+    <td>${d.hostname || ''}</td>
     <td class="device-type">${d.device_type}</td>
     <td>${d.manufacturer}</td>
     <td class="mac">${d.mac}</td>

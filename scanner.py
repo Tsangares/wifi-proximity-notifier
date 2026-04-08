@@ -74,28 +74,39 @@ def _parse_arp_scan():
 
 
 def _parse_nmap_scan(subnet="10.0.0.0/24"):
-    """Run nmap ping sweep and parse output."""
+    """Run nmap ping sweep and parse output. Returns set of (mac, ip) and dict of ip->hostname."""
     devices = set()
+    hostnames = {}
     try:
         out = subprocess.check_output(
             ["nmap", "-sn", subnet, "--host-timeout", "5s"],
             text=True, timeout=30, stderr=subprocess.DEVNULL,
         )
         current_ip = None
+        current_hostname = ""
         for line in out.strip().split("\n"):
-            ip_match = re.search(r"Nmap scan report for\s+\S*\s*\(?(\d+\.\d+\.\d+\.\d+)\)?", line)
+            ip_match = re.search(r"Nmap scan report for\s+(\S+)\s*\(?(\d+\.\d+\.\d+\.\d+)\)?", line)
             if ip_match:
-                current_ip = ip_match.group(1)
+                hostname_or_ip = ip_match.group(1)
+                current_ip = ip_match.group(2)
+                # If the first capture is not the IP itself, it's a hostname
+                if hostname_or_ip != current_ip:
+                    current_hostname = hostname_or_ip.rstrip(".")
+                else:
+                    current_hostname = ""
             mac_match = re.search(r"MAC Address:\s+([0-9A-Fa-f:]{17})", line)
             if mac_match and current_ip:
                 mac = mac_match.group(1).lower()
                 devices.add((mac, current_ip))
+                if current_hostname:
+                    hostnames[mac] = current_hostname
                 current_ip = None
+                current_hostname = ""
     except FileNotFoundError:
         log.debug("nmap not installed, skipping")
     except Exception as e:
         log.warning("nmap scan failed: %s", e)
-    return devices
+    return devices, hostnames
 
 
 def _detect_subnet():
@@ -108,6 +119,47 @@ def _detect_subnet():
     except Exception:
         pass
     return "10.0.0.0/24"
+
+
+def _resolve_hostname(ip):
+    """Try DNS reverse lookup for an IP."""
+    try:
+        import socket
+        hostname = socket.gethostbyaddr(ip)[0]
+        if hostname and not hostname.startswith(ip):
+            return hostname
+    except Exception:
+        pass
+    return ""
+
+
+def _identify_by_hostname(hostname):
+    """Identify device type from hostname string."""
+    if not hostname:
+        return None
+    h = hostname.lower()
+    # iPhone patterns: "iPhone-de-Juan.local", "Juans-iPhone.local", "iPhone.local"
+    if "iphone" in h:
+        return "iPhone"
+    if "ipad" in h:
+        return "iPad"
+    if "macbook" in h:
+        return "MacBook"
+    if "imac" in h:
+        return "iMac"
+    if "appletv" in h or "apple-tv" in h:
+        return "Apple TV"
+    if "android" in h:
+        return "Android"
+    if "galaxy" in h:
+        return "Android (Samsung Galaxy)"
+    if "pixel" in h:
+        return "Android (Pixel)"
+    if "windows" in h or "desktop-" in h or "laptop-" in h:
+        return "Windows PC"
+    if "raspberrypi" in h:
+        return "Raspberry Pi"
+    return None
 
 
 def _get_own_mac():
@@ -124,8 +176,10 @@ def _get_own_mac():
         return set()
 
 
-def _process_scan_results(found_devices):
+def _process_scan_results(found_devices, hostnames=None):
     """Process a set of (mac, ip) from scanning. Handle connect/disconnect logic."""
+    if hostnames is None:
+        hostnames = {}
     now = datetime.now()
     own_macs = _get_own_mac()
 
@@ -141,22 +195,33 @@ def _process_scan_results(found_devices):
             seen_macs.add(mac)
             _last_seen[mac] = now
 
+            # Resolve hostname
+            hostname = hostnames.get(mac, "")
+            if not hostname:
+                hostname = _resolve_hostname(ip)
+
+            # Get manufacturer info
+            vendor, dtype = mfr.lookup(mac)
+
+            # Override device type if hostname gives us better info
+            hostname_type = _identify_by_hostname(hostname)
+            if hostname_type:
+                dtype = hostname_type
+
             # Check if device is in DB
             device = device_db.get_device(mac)
 
             if device is None:
                 # Brand new device never seen before
-                vendor, dtype = mfr.lookup(mac)
-                device_db.upsert_device(mac, ip, vendor, dtype)
+                device_db.upsert_device(mac, ip, vendor, dtype, hostname)
                 device_db.log_event(mac, "connect", ip)
                 _notified_new[mac] = now
-                log.info("NEW DEVICE: %s (%s) %s - %s", mac, ip, vendor, dtype)
+                log.info("NEW DEVICE: %s (%s) [%s] %s - %s", mac, ip, hostname, vendor, dtype)
                 notifier.notify_new_device(mac, ip, vendor, dtype)
 
             elif not device["is_active"]:
                 # Device returning after being marked inactive
-                vendor, dtype = mfr.lookup(mac)
-                device_db.upsert_device(mac, ip, vendor, dtype)
+                device_db.upsert_device(mac, ip, vendor, dtype, hostname)
                 device_db.log_event(mac, "connect", ip)
 
                 # Check if it was gone long enough to warrant notification
@@ -181,7 +246,8 @@ def _process_scan_results(found_devices):
                 # Device still active, just update last_seen
                 device_db.upsert_device(mac, ip,
                                         device.get("manufacturer", "Unknown"),
-                                        device.get("device_type", "Unknown"))
+                                        device.get("device_type", "Unknown"),
+                                        hostname)
 
         # Check for disconnections
         for mac in list(_last_seen.keys()):
@@ -227,13 +293,14 @@ def scan_loop():
             devices.update(arp_devices)
 
             # Periodic nmap sweep
+            hostnames = {}
             if time.time() - last_nmap >= NMAP_SCAN_INTERVAL:
-                nmap_devices = _parse_nmap_scan(subnet)
+                nmap_devices, hostnames = _parse_nmap_scan(subnet)
                 devices.update(nmap_devices)
                 last_nmap = time.time()
 
             log.debug("Scan found %d devices", len(devices))
-            _process_scan_results(devices)
+            _process_scan_results(devices, hostnames)
 
         except Exception as e:
             log.error("Scan loop error: %s", e, exc_info=True)
