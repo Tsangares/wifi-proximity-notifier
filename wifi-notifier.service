@@ -1,0 +1,19 @@
+[Unit]
+Description=WiFi Proximity Notifier
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/home/wil/Desktop/wifi-proximit-notifier
+ExecStart=/home/wil/Desktop/wifi-proximit-notifier/venv/bin/python3 app.py
+Restart=on-failure
+RestartSec=5
+Environment=DISPLAY=:0
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
