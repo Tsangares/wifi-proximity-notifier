@@ -6,13 +6,13 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/home/wil/Desktop/wifi-proximity-notifier
-ExecStart=/home/wil/Desktop/wifi-proximity-notifier/venv/bin/python3 app.py
+WorkingDirectory=__INSTALL_DIR__
+ExecStart=__INSTALL_DIR__/venv/bin/python3 app.py
 Restart=on-failure
 RestartSec=5
 Environment=DISPLAY=:0
-Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
-Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/__UID__/bus
+Environment=XDG_RUNTIME_DIR=/run/user/__UID__
 Environment=PYTHONUNBUFFERED=1
 
 [Install]
