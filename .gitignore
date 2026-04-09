@@ -4,3 +4,4 @@ __pycache__/
 *.db
 *.log
 wifi-notifier.service
+CLAUDE.md
