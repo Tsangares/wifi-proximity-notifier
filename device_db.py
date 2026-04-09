@@ -43,9 +43,10 @@ def _init_tables(conn):
         CREATE INDEX IF NOT EXISTS idx_activity_mac ON activity_log(mac);
     """)
     # Migrate: add hostname column if missing
-    cols = [r[1] for r in conn.execute("PRAGMA table_info(devices)").fetchall()]
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(devices)").fetchall()}
     if "hostname" not in cols:
         conn.execute("ALTER TABLE devices ADD COLUMN hostname TEXT DEFAULT ''")
+        conn.commit()
 
 
 def upsert_device(mac, ip, manufacturer="Unknown", device_type="Unknown", hostname=""):

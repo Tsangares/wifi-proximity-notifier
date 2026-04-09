@@ -25,8 +25,9 @@ def init():
 
 # Map manufacturer substrings to friendly device types
 _TYPE_MAP = [
-    # Apple
-    (["apple"], "Apple Device"),
+    # Apple — real (non-randomized) MACs are Macs, Apple TVs, HomePods
+    # iPhones/iPads use randomized MACs and get identified via hostname
+    (["apple"], "Apple (Mac/TV/HomePod)"),
     # Android manufacturers
     (["samsung"], "Android (Samsung)"),
     (["google"], "Android (Google)"),

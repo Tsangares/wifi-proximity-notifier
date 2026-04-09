@@ -12,11 +12,11 @@ import notifier
 log = logging.getLogger(__name__)
 
 # Timing config
-FAST_SCAN_INTERVAL = 10      # seconds between arp scans
-NMAP_SCAN_INTERVAL = 30      # seconds between nmap sweeps
-DISCONNECT_TIMEOUT = 90      # seconds before declaring device gone
-NEW_DEVICE_WINDOW = 300      # seconds — if unseen for this long, treat as "new" again
-RECONNECT_GRACE = 30         # seconds — suppress re-notification if device was gone < this
+FAST_SCAN_INTERVAL = 2       # seconds between fast ARP checks
+DETAIL_SCAN_INTERVAL = 20    # seconds between full nmap/arp-scan sweeps
+DISCONNECT_TIMEOUT = 12      # seconds before declaring device gone
+NEW_DEVICE_WINDOW = 30       # seconds — if unseen for this long, treat as "new" again
+RECONNECT_GRACE = 5          # seconds — suppress re-notification if device was gone < this
 
 # State tracking
 _last_seen = {}       # mac -> datetime of last scan that saw it
@@ -26,8 +26,50 @@ _lock = threading.Lock()
 _running = False
 
 
+def _quick_ping(ip):
+    """Quick single ping to verify device is alive. Returns True if responds."""
+    try:
+        result = subprocess.run(
+            ["ping", "-c", "1", "-W", "1", ip],
+            capture_output=True, timeout=2,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def _parallel_ping(ips):
+    """Ping multiple IPs in parallel using both ICMP and ARP. Return set of alive IPs."""
+    if not ips:
+        return set()
+    procs = {}
+    for ip in ips:
+        try:
+            # ARP ping — works even when phones block ICMP
+            procs[("arp", ip)] = subprocess.Popen(
+                ["arping", "-c", "1", "-w", "1", ip],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            # ICMP ping — catches devices that respond to ping
+            procs[("icmp", ip)] = subprocess.Popen(
+                ["ping", "-c", "1", "-W", "1", ip],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+        except Exception:
+            pass
+    alive = set()
+    for (kind, ip), proc in procs.items():
+        try:
+            proc.wait(timeout=2)
+            if proc.returncode == 0:
+                alive.add(ip)
+        except Exception:
+            proc.kill()
+    return alive
+
+
 def _parse_ip_neigh():
-    """Parse 'ip neigh' for MAC/IP pairs."""
+    """Parse 'ip neigh' for MAC/IP pairs. Only REACHABLE entries — stale ones are unreliable."""
     devices = set()
     try:
         out = subprocess.check_output(["ip", "neigh"], text=True, timeout=5)
@@ -44,8 +86,8 @@ def _parse_ip_neigh():
                 idx = parts.index("lladdr")
                 mac = parts[idx + 1].lower()
                 state = parts[-1] if len(parts) > idx + 2 else ""
-                # Skip FAILED entries
-                if state not in ("FAILED", "INCOMPLETE"):
+                # Only trust REACHABLE — STALE entries linger after device leaves
+                if state == "REACHABLE":
                     devices.add((mac, ip))
     except Exception as e:
         log.warning("ip neigh failed: %s", e)
@@ -54,10 +96,12 @@ def _parse_ip_neigh():
 
 def _parse_arp_scan():
     """Run arp-scan --localnet and parse output."""
+    # Flush stale ARP cache first so we only get live responses
+    subprocess.run(["ip", "neigh", "flush", "nud", "stale"], capture_output=True, timeout=3)
     devices = set()
     try:
         out = subprocess.check_output(
-            ["arp-scan", "--localnet", "--retry=1", "--timeout=500"],
+            ["arp-scan", "--localnet", "--retry=1", "--timeout=200", "--plain"],
             text=True, timeout=15, stderr=subprocess.DEVNULL,
         )
         for line in out.strip().split("\n"):
@@ -156,9 +200,17 @@ def _identify_by_hostname(hostname):
     if "pixel" in h:
         return "Android (Pixel)"
     if "windows" in h or "desktop-" in h or "laptop-" in h:
-        return "Windows PC"
+        return "Windows Desktop"
     if "raspberrypi" in h:
         return "Raspberry Pi"
+    if "tasmota" in h or "esp8266" in h or "esp32" in h:
+        return "IoT (Tasmota)"
+    if "onn" in h or "streaming" in h:
+        return "Android TV"
+    if "vizio" in h or "casttv" in h or "smartcast" in h:
+        return "TV (Vizio)"
+    if "brw" in h and h.startswith("brw"):
+        return "Printer"
     return None
 
 
@@ -226,22 +278,18 @@ def _process_scan_results(found_devices, hostnames=None):
 
                 # Check if it was gone long enough to warrant notification
                 disc_time = _disconnect_ts.get(mac)
-                last_notif = _notified_new.get(mac)
 
                 if disc_time and (now - disc_time).total_seconds() < RECONNECT_GRACE:
                     # Quick reconnect — suppress notification
                     log.debug("Quick reconnect (< %ds), suppressing notification for %s",
                               RECONNECT_GRACE, mac)
-                elif last_notif and (now - last_notif).total_seconds() < NEW_DEVICE_WINDOW:
-                    # Recently notified about this device
-                    log.debug("Recently notified about %s, suppressing", mac)
                 else:
+                    # Always notify on reconnect
                     _notified_new[mac] = now
-                    is_returning = device["first_seen"] != device["last_seen"]
                     notifier.notify_new_device(mac, ip,
                                                device.get("manufacturer", vendor),
                                                device.get("device_type", dtype),
-                                               is_returning=is_returning)
+                                               is_returning=True)
             else:
                 # Device still active, just update last_seen
                 device_db.upsert_device(mac, ip,
@@ -260,6 +308,12 @@ def _process_scan_results(found_devices, hostnames=None):
             if elapsed >= DISCONNECT_TIMEOUT:
                 device = device_db.get_device(mac)
                 if device and device["is_active"]:
+                    # Quick ping to confirm device is really gone
+                    ip = device.get("ip", "")
+                    if ip and _quick_ping(ip):
+                        _last_seen[mac] = now
+                        log.debug("Ping confirmed %s still alive", mac)
+                        continue
                     device_db.mark_inactive(mac)
                     device_db.log_event(mac, "disconnect", device.get("ip", ""))
                     _disconnect_ts[mac] = now
@@ -279,25 +333,60 @@ def scan_loop():
     _running = True
     subnet = _detect_subnet()
     log.info("Starting scanner on subnet %s", subnet)
-    log.info("Timings: scan=%ds, nmap=%ds, disconnect=%ds, new_window=%ds, grace=%ds",
-             FAST_SCAN_INTERVAL, NMAP_SCAN_INTERVAL, DISCONNECT_TIMEOUT,
+    log.info("Timings: fast=%ds, detail=%ds, disconnect=%ds, new_window=%ds, grace=%ds",
+             FAST_SCAN_INTERVAL, DETAIL_SCAN_INTERVAL, DISCONNECT_TIMEOUT,
              NEW_DEVICE_WINDOW, RECONNECT_GRACE)
 
-    last_nmap = 0
+    last_detail = 0
+
+    # Start detail scanner in separate thread so it doesn't block fast scans
+    detail_results = {"devices": set(), "hostnames": {}, "time": 0}
+    detail_lock = threading.Lock()
+
+    def detail_loop():
+        while _running:
+            try:
+                arp_devices = _parse_arp_scan()
+                nmap_devices, hostnames = _parse_nmap_scan(subnet)
+                with detail_lock:
+                    detail_results["devices"] = arp_devices | nmap_devices
+                    detail_results["hostnames"] = hostnames
+                    detail_results["time"] = time.time()
+            except Exception as e:
+                log.error("Detail scan error: %s", e, exc_info=True)
+            time.sleep(DETAIL_SCAN_INTERVAL)
+
+    detail_thread = threading.Thread(target=detail_loop, daemon=True)
+    detail_thread.start()
 
     while _running:
         try:
-            # Always do fast scans
+            # Fast scan: ARP table + quick arping of recently-seen IPs
             devices = _parse_ip_neigh()
-            arp_devices = _parse_arp_scan()
-            devices.update(arp_devices)
 
-            # Periodic nmap sweep
-            hostnames = {}
-            if time.time() - last_nmap >= NMAP_SCAN_INTERVAL:
-                nmap_devices, hostnames = _parse_nmap_scan(subnet)
-                devices.update(nmap_devices)
-                last_nmap = time.time()
+            # Parallel ping all known device IPs for fast connect/disconnect detection
+            all_known = device_db.get_all_devices()
+            ip_to_mac = {}
+            ping_ips = set()
+            for d in all_known:
+                ip = d.get("ip", "")
+                mac = d.get("mac", "")
+                if ip and mac:
+                    ip_to_mac[ip] = mac
+                    ping_ips.add(ip)
+
+            alive_ips = _parallel_ping(ping_ips)
+            for ip in alive_ips:
+                mac = ip_to_mac.get(ip)
+                if mac:
+                    devices.add((mac, ip))
+
+            # Only merge detail results if they're fresh (< 10s old)
+            with detail_lock:
+                detail_age = time.time() - detail_results["time"]
+                if detail_age < 10:
+                    devices.update(detail_results["devices"])
+                hostnames = dict(detail_results["hostnames"])
 
             log.debug("Scan found %d devices", len(devices))
             _process_scan_results(devices, hostnames)

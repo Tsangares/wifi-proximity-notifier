@@ -3,90 +3,307 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>WiFi Device Monitor</title>
+<title>WiFi Monitor</title>
 <style>
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
   * { box-sizing: border-box; margin: 0; padding: 0; }
+
   body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
-    background: #0d1117; color: #c9d1d9; padding: 20px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', Roboto, sans-serif;
+    background: #0a0a0f;
+    color: #e0e0e8;
+    min-height: 100vh;
   }
-  h1 { color: #58a6ff; margin-bottom: 20px; }
-  h2 { color: #8b949e; margin: 20px 0 10px; font-size: 1.1em; text-transform: uppercase; letter-spacing: 1px; }
-  .stats {
-    display: flex; gap: 15px; margin-bottom: 20px;
+
+  body::before {
+    content: '';
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background:
+      radial-gradient(ellipse at 20% 50%, rgba(0, 240, 255, 0.03) 0%, transparent 50%),
+      radial-gradient(ellipse at 80% 20%, rgba(168, 85, 247, 0.03) 0%, transparent 50%);
+    pointer-events: none; z-index: 0;
   }
-  .stat-box {
-    background: #161b22; border: 1px solid #30363d; border-radius: 8px;
-    padding: 15px 25px; text-align: center;
+
+  .container {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 24px 20px;
+    position: relative; z-index: 1;
   }
-  .stat-box .num { font-size: 2em; font-weight: bold; color: #58a6ff; }
-  .stat-box .label { color: #8b949e; font-size: 0.85em; }
-  table {
-    width: 100%; border-collapse: collapse; margin-bottom: 20px;
-    background: #161b22; border-radius: 8px; overflow: hidden;
+
+  .header {
+    display: flex; align-items: center; gap: 14px; margin-bottom: 28px;
   }
-  th { background: #21262d; color: #8b949e; text-align: left; padding: 10px 12px; font-weight: 600; font-size: 0.85em; text-transform: uppercase; }
-  td { padding: 8px 12px; border-top: 1px solid #21262d; font-size: 0.9em; }
-  tr:hover td { background: #1c2128; }
-  .active-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
-  .active-dot.on { background: #3fb950; }
-  .active-dot.off { background: #6e7681; }
-  .mac { font-family: monospace; color: #8b949e; font-size: 0.85em; }
-  .device-type { color: #d2a8ff; font-weight: 500; }
+  .header-icon {
+    width: 40px; height: 40px;
+    background: linear-gradient(135deg, #00f0ff, #a855f7);
+    border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px;
+  }
+  .header h1 {
+    font-size: 1.5em; font-weight: 700; color: #e0e0e8;
+  }
+  .header-time {
+    margin-left: auto; color: #55556a; font-size: 0.8em;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .card {
+    background: rgba(255, 255, 255, 0.04);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 16px;
+    padding: 20px;
+    transition: border-color 0.3s;
+  }
+
+  .bento {
+    display: grid;
+    grid-template-columns: 1fr 300px;
+    gap: 16px;
+  }
+
+  /* Stats row */
+  .stats { display: flex; gap: 16px; flex-direction: column; }
+  .stat-card { text-align: center; padding: 24px 20px; }
+  .stat-num {
+    font-size: 2.8em; font-weight: 800; line-height: 1; margin-bottom: 4px;
+    color: #fff;
+  }
+  .stat-label {
+    color: #6b6b80; font-size: 0.75em; text-transform: uppercase;
+    letter-spacing: 1.5px; font-weight: 600;
+  }
+
+  .section-title {
+    font-size: 0.75em; text-transform: uppercase; letter-spacing: 1.5px;
+    color: #55556a; font-weight: 600; margin-bottom: 14px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .section-title .count {
+    background: rgba(255, 255, 255, 0.06); padding: 2px 8px;
+    border-radius: 10px; color: #8b8b9e;
+  }
+
+  /* Device rows */
+  .device-list { display: flex; flex-direction: column; gap: 4px; }
+
+  .device-row {
+    display: grid;
+    grid-template-columns: auto 1fr 1fr 1fr 90px;
+    gap: 12px; align-items: center;
+    padding: 10px 14px; border-radius: 10px;
+    transition: background 0.2s;
+    animation: fadeIn 0.3s ease-out;
+    border-left: 3px solid transparent;
+  }
+  .device-row:hover { background: rgba(255, 255, 255, 0.03); }
+  .device-row-header {
+    padding: 6px 14px 10px; color: #44445a; font-size: 0.7em;
+    text-transform: uppercase; letter-spacing: 1px; font-weight: 600;
+    border-left: 3px solid transparent;
+  }
+  .device-row-header:hover { background: transparent; }
+
+  /* ONLINE row: bright, thick left border, full opacity */
+  .device-row.online {
+    border-left: 3px solid #fff;
+    background: rgba(255, 255, 255, 0.025);
+  }
+
+  /* OFFLINE row: dim, dashed left border, reduced opacity */
+  .device-row.offline {
+    border-left: 3px dashed #333345;
+    opacity: 0.45;
+  }
+  .device-row.offline:hover { opacity: 0.7; }
+
+  /* Status badge — text label, not just a dot */
+  .status-badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 10px; border-radius: 20px;
+    font-size: 0.7em; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.5px; white-space: nowrap;
+  }
+  .status-badge.online {
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+  }
+  .status-badge.online .badge-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: #fff;
+    animation: pulse 1.5s ease-in-out infinite;
+  }
+  .status-badge.offline {
+    background: rgba(255, 255, 255, 0.03);
+    color: #555;
+    border: 1px dashed #333;
+  }
+  .status-badge.offline .badge-dot {
+    width: 6px; height: 6px;
+    background: transparent;
+    border: 1px solid #444;
+    border-radius: 50%;
+  }
+
+  .device-name-wrap { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .device-secondary {
+    font-size: 0.75em; color: #55556a;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .device-type { font-size: 0.82em; color: #a0a0b8; font-weight: 500; }
+  .device-mfr { font-size: 0.78em; color: #55556a; }
+  .device-mac {
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 0.75em; color: #44445a;
+  }
+  .device-ip {
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 0.8em; color: #6b6b80;
+  }
+  .device-time { font-size: 0.78em; color: #55556a; text-align: right; }
+
   .editable-name {
-    background: transparent; border: 1px solid transparent; color: #c9d1d9;
-    padding: 2px 6px; border-radius: 4px; font-size: 0.9em; width: 120px;
-    font-family: inherit;
+    background: transparent; border: 1px solid transparent;
+    color: #e0e0e8; font-weight: 600; padding: 2px 6px; margin: -2px -6px;
+    border-radius: 6px; font-size: 0.9em; font-family: inherit;
+    width: 100%; outline: none; transition: border-color 0.2s, background 0.2s;
   }
-  .editable-name:hover { border-color: #30363d; }
-  .editable-name:focus { border-color: #58a6ff; outline: none; background: #0d1117; }
-  .event-connect { color: #3fb950; }
-  .event-disconnect { color: #f85149; }
-  .time-ago { color: #8b949e; font-size: 0.85em; }
-  .refresh-note { color: #484f58; font-size: 0.8em; margin-top: 10px; }
-  #activity-section { max-height: 400px; overflow-y: auto; }
+  .editable-name::placeholder { color: #333345; font-weight: 400; }
+  .editable-name:hover { border-color: rgba(255, 255, 255, 0.08); }
+  .editable-name:focus {
+    border-color: rgba(255, 255, 255, 0.2);
+    background: rgba(255, 255, 255, 0.03);
+  }
+  .offline .editable-name { color: #666; }
+
+  /* Activity feed */
+  .activity-feed {
+    max-height: 520px; overflow-y: auto;
+    display: flex; flex-direction: column; gap: 0;
+    scrollbar-width: thin; scrollbar-color: #222235 transparent;
+  }
+  .activity-item {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 10px 12px; border-radius: 8px; transition: background 0.2s;
+  }
+  .activity-item:hover { background: rgba(255, 255, 255, 0.02); }
+
+  /* Activity icons: arrow shapes instead of colored dots */
+  .activity-icon {
+    width: 22px; height: 22px; border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 900; flex-shrink: 0; margin-top: 1px;
+  }
+  .activity-icon.connect {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+  }
+  .activity-icon.disconnect {
+    background: transparent;
+    color: #555;
+    border: 1px dashed #333;
+  }
+
+  .activity-info { flex: 1; min-width: 0; }
+  .activity-event { font-size: 0.8em; font-weight: 600; }
+  .activity-event.connect { color: #fff; }
+  .activity-event.disconnect { color: #555; }
+  .activity-device {
+    font-size: 0.75em; color: #55556a;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .activity-time { font-size: 0.7em; color: #44445a; white-space: nowrap; margin-top: 2px; }
+
+  @media (max-width: 900px) {
+    .bento { grid-template-columns: 1fr; }
+    .stats { flex-direction: row; }
+    .stat-card { flex: 1; }
+    .device-row { grid-template-columns: auto 1fr 1fr; }
+    .device-row .col-mac, .device-row .col-time,
+    .device-row-header .col-mac, .device-row-header .col-time { display: none; }
+  }
+
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #222235; border-radius: 4px; }
+
+  .empty { color: #333345; font-size: 0.85em; text-align: center; padding: 30px 0; }
 </style>
 </head>
 <body>
-<h1>WiFi Device Monitor</h1>
-<div class="stats">
-  <div class="stat-box"><div class="num" id="active-count">0</div><div class="label">Active</div></div>
-  <div class="stat-box"><div class="num" id="total-count">0</div><div class="label">Total Known</div></div>
+<div class="container">
+
+  <div class="header">
+    <div class="header-icon">&#x1f4e1;</div>
+    <h1>WiFi Monitor</h1>
+    <div class="header-time" id="clock"></div>
+  </div>
+
+  <div class="bento">
+    <div class="card" id="active-card">
+      <div class="section-title">Active Devices <span class="count" id="active-badge">0</span></div>
+      <div class="device-list">
+        <div class="device-row device-row-header">
+          <div>Status</div>
+          <div>Device</div>
+          <div>Type</div>
+          <div class="col-mac">Address</div>
+          <div class="col-time">Seen</div>
+        </div>
+        <div id="active-list"></div>
+      </div>
+    </div>
+
+    <div class="stats">
+      <div class="card stat-card">
+        <div class="stat-num" id="active-count">0</div>
+        <div class="stat-label">Online Now</div>
+      </div>
+      <div class="card stat-card">
+        <div class="stat-num" id="total-count">0</div>
+        <div class="stat-label">Total Known</div>
+      </div>
+    </div>
+
+    <div class="card" id="past-card">
+      <div class="section-title">Offline Devices <span class="count" id="past-badge">0</span></div>
+      <div class="device-list">
+        <div class="device-row device-row-header">
+          <div>Status</div>
+          <div>Device</div>
+          <div>Type</div>
+          <div class="col-mac">Address</div>
+          <div class="col-time">Last Seen</div>
+        </div>
+        <div id="past-list"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="section-title">Activity</div>
+      <div class="activity-feed" id="activity-feed"></div>
+    </div>
+  </div>
+
 </div>
-
-<h2>Active Devices</h2>
-<table id="active-table">
-  <thead><tr>
-    <th></th><th>Name</th><th>Hostname</th><th>Type</th><th>Manufacturer</th><th>MAC</th><th>IP</th><th>First Seen</th><th>Last Seen</th>
-  </tr></thead>
-  <tbody id="active-body"></tbody>
-</table>
-
-<h2>Past Devices</h2>
-<table id="inactive-table">
-  <thead><tr>
-    <th></th><th>Name</th><th>Hostname</th><th>Type</th><th>Manufacturer</th><th>MAC</th><th>IP</th><th>First Seen</th><th>Last Seen</th>
-  </tr></thead>
-  <tbody id="inactive-body"></tbody>
-</table>
-
-<h2>Activity Log</h2>
-<div id="activity-section">
-<table id="activity-table">
-  <thead><tr>
-    <th>Time</th><th>Event</th><th>Device</th><th>MAC</th><th>IP</th>
-  </tr></thead>
-  <tbody id="activity-body"></tbody>
-</table>
-</div>
-
-<p class="refresh-note">Auto-refreshes every 10 seconds</p>
 
 <script>
 function timeAgo(iso) {
   if (!iso) return '';
-  const d = new Date(iso);
-  const s = Math.floor((Date.now() - d.getTime()) / 1000);
+  const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 5) return 'just now';
   if (s < 60) return s + 's ago';
   if (s < 3600) return Math.floor(s/60) + 'm ago';
   if (s < 86400) return Math.floor(s/3600) + 'h ago';
@@ -99,31 +316,45 @@ function fmtTime(iso) {
 }
 
 function deviceRow(d, active) {
-  const dot = `<span class="active-dot ${active ? 'on' : 'off'}"></span>`;
-  const name = `<input class="editable-name" value="${d.custom_name || ''}" placeholder="unnamed" data-mac="${d.mac}" onchange="rename(this)">`;
-  return `<tr>
-    <td>${dot}</td>
-    <td>${name}</td>
-    <td>${d.hostname || ''}</td>
-    <td class="device-type">${d.device_type}</td>
-    <td>${d.manufacturer}</td>
-    <td class="mac">${d.mac}</td>
-    <td>${d.ip || ''}</td>
-    <td class="time-ago" title="${fmtTime(d.first_seen)}">${timeAgo(d.first_seen)}</td>
-    <td class="time-ago" title="${fmtTime(d.last_seen)}">${timeAgo(d.last_seen)}</td>
-  </tr>`;
+  const statusCls = active ? 'online' : 'offline';
+  const statusLabel = active ? 'ONLINE' : 'OFFLINE';
+  const badge = `<span class="status-badge ${statusCls}"><span class="badge-dot"></span>${statusLabel}</span>`;
+
+  const displayName = d.custom_name || d.hostname || '';
+  const nameInput = `<input class="editable-name" value="${displayName}" placeholder="unnamed" data-mac="${d.mac}" onchange="rename(this)" onfocus="this.select()">`;
+  const secondary = d.hostname && d.custom_name ? d.hostname : (d.ip || '');
+
+  return `<div class="device-row ${statusCls}">
+    ${badge}
+    <div class="device-name-wrap">
+      ${nameInput}
+      <div class="device-secondary">${secondary}</div>
+    </div>
+    <div>
+      <div class="device-type">${d.device_type}</div>
+      <div class="device-mfr">${d.manufacturer}</div>
+    </div>
+    <div class="col-mac">
+      <div class="device-ip">${d.ip || ''}</div>
+      <div class="device-mac">${d.mac}</div>
+    </div>
+    <div class="col-time device-time" title="${fmtTime(d.last_seen)}">${timeAgo(d.last_seen)}</div>
+  </div>`;
 }
 
-function activityRow(a) {
-  const cls = a.event === 'connect' ? 'event-connect' : 'event-disconnect';
-  const name = a.custom_name || a.device_type || '';
-  return `<tr>
-    <td class="time-ago" title="${fmtTime(a.timestamp)}">${timeAgo(a.timestamp)}</td>
-    <td class="${cls}">${a.event}</td>
-    <td>${name}</td>
-    <td class="mac">${a.mac}</td>
-    <td>${a.ip || ''}</td>
-  </tr>`;
+function activityItem(a) {
+  const cls = a.event === 'connect' ? 'connect' : 'disconnect';
+  const icon = a.event === 'connect' ? '+' : '-';
+  const label = a.event === 'connect' ? 'Connected' : 'Disconnected';
+  const name = a.custom_name || a.device_type || a.mac;
+  return `<div class="activity-item">
+    <div class="activity-icon ${cls}">${icon}</div>
+    <div class="activity-info">
+      <div class="activity-event ${cls}">${label}</div>
+      <div class="activity-device">${name} &middot; ${a.ip || ''}</div>
+    </div>
+    <div class="activity-time">${timeAgo(a.timestamp)}</div>
+  </div>`;
 }
 
 function rename(el) {
@@ -132,22 +363,62 @@ function rename(el) {
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({name: el.value})
   });
+  el.blur();
 }
+
+function updateClock() {
+  document.getElementById('clock').textContent =
+    new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+}
+
+let prevActive = '', prevInactive = '', prevActivity = '';
 
 function refresh() {
   fetch('/api/devices').then(r => r.json()).then(data => {
     document.getElementById('active-count').textContent = data.active.length;
     document.getElementById('total-count').textContent = data.active.length + data.inactive.length;
-    document.getElementById('active-body').innerHTML = data.active.map(d => deviceRow(d, true)).join('');
-    document.getElementById('inactive-body').innerHTML = data.inactive.map(d => deviceRow(d, false)).join('');
+    document.getElementById('active-badge').textContent = data.active.length;
+    document.getElementById('past-badge').textContent = data.inactive.length;
+
+    const sortByLastSeen = (a, b) => new Date(b.last_seen) - new Date(a.last_seen);
+    data.active.sort(sortByLastSeen);
+    data.inactive.sort(sortByLastSeen);
+
+    const activeHtml = data.active.length
+      ? data.active.map(d => deviceRow(d, true)).join('')
+      : '<div class="empty">No devices online</div>';
+    const inactiveHtml = data.inactive.length
+      ? data.inactive.map(d => deviceRow(d, false)).join('')
+      : '<div class="empty">No offline devices</div>';
+
+    const al = document.getElementById('active-list');
+    const pl = document.getElementById('past-list');
+
+    if (activeHtml !== prevActive) {
+      al.style.opacity = '0.5';
+      setTimeout(() => { al.innerHTML = activeHtml; al.style.opacity = '1'; }, 150);
+      prevActive = activeHtml;
+    }
+    if (inactiveHtml !== prevInactive) {
+      pl.style.opacity = '0.5';
+      setTimeout(() => { pl.innerHTML = inactiveHtml; pl.style.opacity = '1'; }, 150);
+      prevInactive = inactiveHtml;
+    }
   });
-  fetch('/api/activity?limit=50').then(r => r.json()).then(data => {
-    document.getElementById('activity-body').innerHTML = data.map(activityRow).join('');
+
+  fetch('/api/activity?limit=30').then(r => r.json()).then(data => {
+    const html = data.map(activityItem).join('');
+    if (html !== prevActivity) {
+      document.getElementById('activity-feed').innerHTML = html;
+      prevActivity = html;
+    }
   });
 }
 
+updateClock();
+setInterval(updateClock, 1000);
 refresh();
-setInterval(refresh, 10000);
+setInterval(refresh, 5000);
 </script>
 </body>
 </html>
