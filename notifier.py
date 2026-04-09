@@ -11,7 +11,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CONNECT_SOUND = os.path.join(SCRIPT_DIR, "static", "connect.wav")
 DISCONNECT_SOUND = os.path.join(SCRIPT_DIR, "static", "disconnect.wav")
 FALLBACK_SOUND = "/usr/share/sounds/gnome/default/alerts/swing.ogg"
-DISMISS_AFTER = 10  # seconds
+DISMISS_AFTER = 5  # seconds — notification slides to tray after this
 
 # Find the real (non-root) user for sending notifications
 _NOTIFY_UID = int(os.environ.get("SUDO_UID", 0)) or 1000
@@ -80,11 +80,7 @@ def _send_notification(title, body, icon="network-wireless", timeout=DISMISS_AFT
         out = result.stdout.strip()
         if result.returncode != 0:
             log.warning("gdbus failed (rc=%d): %s", result.returncode, result.stderr.strip())
-        if "uint32" in out:
-            nid = out.split("uint32")[1].strip().rstrip(",)")
-            threading.Thread(
-                target=_close_notification, args=(int(nid), timeout), daemon=True
-            ).start()
+        # Don't force-close — let GNOME move it to the tray naturally
     except Exception as e:
         log.warning("gdbus notification failed: %s", e)
         # Fallback to notify-send

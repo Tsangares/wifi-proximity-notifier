@@ -251,9 +251,24 @@
     <div class="header-time" id="clock"></div>
   </div>
 
+  <!-- Phones panel -->
+  <div class="card" id="phones-card" style="margin-bottom: 16px;">
+    <div class="section-title">Phones &amp; Tablets <span class="count" id="phones-badge">0</span></div>
+    <div class="device-list">
+      <div class="device-row device-row-header">
+        <div>Status</div>
+        <div>Device</div>
+        <div>Type</div>
+        <div class="col-mac">Address</div>
+        <div class="col-time">Seen</div>
+      </div>
+      <div id="phones-list"></div>
+    </div>
+  </div>
+
   <div class="bento">
     <div class="card" id="active-card">
-      <div class="section-title">Active Devices <span class="count" id="active-badge">0</span></div>
+      <div class="section-title">Other Devices <span class="count" id="active-badge">0</span></div>
       <div class="device-list">
         <div class="device-row device-row-header">
           <div>Status</div>
@@ -320,11 +335,14 @@ function deviceRow(d, active) {
   const statusLabel = active ? 'ONLINE' : 'OFFLINE';
   const badge = `<span class="status-badge ${statusCls}"><span class="badge-dot"></span>${statusLabel}</span>`;
 
-  const displayName = d.custom_name || d.hostname || '';
-  const nameInput = `<input class="editable-name" value="${displayName}" placeholder="unnamed" data-mac="${d.mac}" onchange="rename(this)" onfocus="this.select()">`;
-  const secondary = d.hostname && d.custom_name ? d.hostname : (d.ip || '');
+  const displayName = d.custom_name || '';
+  const nameInput = `<input class="editable-name" value="${displayName}" placeholder="${d.device_type}" data-mac="${d.mac}" onchange="rename(this)" onfocus="this.select()">`;
+  const secondary = d.ip || '';
 
-  return `<div class="device-row ${statusCls}">
+  // data-key is a stable fingerprint of the row content (excluding time)
+  const key = `${d.mac}|${statusCls}|${displayName}|${d.device_type}|${d.ip}`;
+
+  return `<div class="device-row ${statusCls}" data-mac="${d.mac}" data-key="${key}">
     ${badge}
     <div class="device-name-wrap">
       ${nameInput}
@@ -338,7 +356,7 @@ function deviceRow(d, active) {
       <div class="device-ip">${d.ip || ''}</div>
       <div class="device-mac">${d.mac}</div>
     </div>
-    <div class="col-time device-time" title="${fmtTime(d.last_seen)}">${timeAgo(d.last_seen)}</div>
+    <div class="col-time device-time" data-ts="${d.last_seen}">${timeAgo(d.last_seen)}</div>
   </div>`;
 }
 
@@ -353,7 +371,7 @@ function activityItem(a) {
       <div class="activity-event ${cls}">${label}</div>
       <div class="activity-device">${name} &middot; ${a.ip || ''}</div>
     </div>
-    <div class="activity-time">${timeAgo(a.timestamp)}</div>
+    <div class="activity-time" data-ts="${a.timestamp}">${timeAgo(a.timestamp)}</div>
   </div>`;
 }
 
@@ -371,52 +389,143 @@ function updateClock() {
     new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
 }
 
-let prevActive = '', prevInactive = '', prevActivity = '';
+function isPhone(d) {
+  const t = (d.device_type || '').toLowerCase();
+  if (t.includes('android tv')) return false;
+  if (t.includes('iphone') || t.includes('ipad') || t.includes('phone') || t.includes('tablet')) return true;
+  if (t.includes('android') && !t.includes('tv') && !t.includes('streaming')) return true;
+  return false;
+}
 
-function refresh() {
-  fetch('/api/devices').then(r => r.json()).then(data => {
-    document.getElementById('active-count').textContent = data.active.length;
-    document.getElementById('total-count').textContent = data.active.length + data.inactive.length;
-    document.getElementById('active-badge').textContent = data.active.length;
-    document.getElementById('past-badge').textContent = data.inactive.length;
+function updateTimes() {
+  document.querySelectorAll('.device-time[data-ts]').forEach(el => {
+    el.textContent = timeAgo(el.dataset.ts);
+  });
+  document.querySelectorAll('.activity-time[data-ts]').forEach(el => {
+    el.textContent = timeAgo(el.dataset.ts);
+  });
+}
 
-    const sortByLastSeen = (a, b) => new Date(b.last_seen) - new Date(a.last_seen);
-    data.active.sort(sortByLastSeen);
-    data.inactive.sort(sortByLastSeen);
+function diffUpdate(container, newDevices, rowFn) {
+  // Build map of existing rows by MAC
+  const existing = {};
+  container.querySelectorAll('[data-mac]').forEach(row => {
+    existing[row.dataset.mac] = row;
+  });
 
-    const activeHtml = data.active.length
-      ? data.active.map(d => deviceRow(d, true)).join('')
-      : '<div class="empty">No devices online</div>';
-    const inactiveHtml = data.inactive.length
-      ? data.inactive.map(d => deviceRow(d, false)).join('')
-      : '<div class="empty">No offline devices</div>';
+  // Track which MACs are in the new data
+  const newMacs = new Set();
+  const focusedEl = document.activeElement;
+  const focusedMac = focusedEl && focusedEl.dataset ? focusedEl.dataset.mac : null;
 
-    const al = document.getElementById('active-list');
-    const pl = document.getElementById('past-list');
+  // Create a temporary container to parse new rows
+  const tmp = document.createElement('div');
 
-    if (activeHtml !== prevActive) {
-      al.style.opacity = '0.5';
-      setTimeout(() => { al.innerHTML = activeHtml; al.style.opacity = '1'; }, 150);
-      prevActive = activeHtml;
-    }
-    if (inactiveHtml !== prevInactive) {
-      pl.style.opacity = '0.5';
-      setTimeout(() => { pl.innerHTML = inactiveHtml; pl.style.opacity = '1'; }, 150);
-      prevInactive = inactiveHtml;
+  newDevices.forEach((d, i) => {
+    newMacs.add(d._mac);
+    const oldRow = existing[d._mac];
+
+    if (oldRow) {
+      // Row exists — only update if content changed (not time)
+      if (oldRow.dataset.key !== d._key) {
+        tmp.innerHTML = d._html;
+        const newRow = tmp.firstElementChild;
+        container.replaceChild(newRow, oldRow);
+      } else {
+        // Just update the time
+        const timeEl = oldRow.querySelector('.device-time[data-ts]');
+        if (timeEl) {
+          timeEl.dataset.ts = d._ts;
+          timeEl.textContent = timeAgo(d._ts);
+        }
+      }
+    } else {
+      // New row — append
+      tmp.innerHTML = d._html;
+      const newRow = tmp.firstElementChild;
+      newRow.style.animation = 'fadeIn 0.3s ease-out';
+      container.appendChild(newRow);
     }
   });
 
-  fetch('/api/activity?limit=30').then(r => r.json()).then(data => {
-    const html = data.map(activityItem).join('');
-    if (html !== prevActivity) {
-      document.getElementById('activity-feed').innerHTML = html;
-      prevActivity = html;
+  // Remove rows no longer in data
+  container.querySelectorAll('[data-mac]').forEach(row => {
+    if (!newMacs.has(row.dataset.mac)) {
+      row.style.opacity = '0';
+      row.style.transition = 'opacity 0.2s';
+      setTimeout(() => row.remove(), 200);
     }
+  });
+
+  // Show empty message if needed
+  const emptyEl = container.querySelector('.empty');
+  if (newDevices.length === 0 && !emptyEl) {
+    container.innerHTML = '<div class="empty">None</div>';
+  } else if (newDevices.length > 0 && emptyEl) {
+    emptyEl.remove();
+  }
+
+  // Restore focus
+  if (focusedMac) {
+    const input = container.querySelector(`[data-mac="${focusedMac}"]`);
+    if (input) input.focus();
+  }
+}
+
+function prepDevices(devices, active) {
+  return devices.map(d => {
+    const isActive = d._active !== undefined ? d._active : active;
+    const statusCls = isActive ? 'online' : 'offline';
+    const displayName = d.custom_name || '';
+    const key = `${d.mac}|${statusCls}|${displayName}|${d.device_type}|${d.ip}`;
+    return {
+      _mac: d.mac,
+      _key: key,
+      _ts: d.last_seen,
+      _html: deviceRow(d, isActive),
+    };
+  });
+}
+
+let lastActivityIds = '';
+
+function refresh() {
+  fetch('/api/devices').then(r => r.json()).then(data => {
+    const all = [...data.active.map(d => ({...d, _active: true})),
+                 ...data.inactive.map(d => ({...d, _active: false}))];
+    const sortByLastSeen = (a, b) => new Date(b.last_seen) - new Date(a.last_seen);
+
+    const phones = all.filter(d => isPhone(d)).sort(sortByLastSeen);
+    const activeOther = data.active.filter(d => !isPhone(d)).sort(sortByLastSeen);
+    const inactive = data.inactive.filter(d => !isPhone(d)).sort(sortByLastSeen);
+
+    document.getElementById('active-count').textContent = data.active.length;
+    document.getElementById('total-count').textContent = all.length;
+    document.getElementById('phones-badge').textContent = phones.length;
+    document.getElementById('active-badge').textContent = activeOther.length;
+    document.getElementById('past-badge').textContent = inactive.length;
+
+    diffUpdate(document.getElementById('phones-list'), prepDevices(phones));
+    diffUpdate(document.getElementById('active-list'), prepDevices(activeOther, true));
+    diffUpdate(document.getElementById('past-list'), prepDevices(inactive, false));
+  });
+
+  fetch('/api/activity?limit=30').then(r => r.json()).then(data => {
+    // Only rebuild activity if the event list actually changed
+    const ids = data.map(a => a.id).join(',');
+    if (ids !== lastActivityIds) {
+      document.getElementById('activity-feed').innerHTML = data.map(activityItem).join('');
+      lastActivityIds = ids;
+    }
+    // Always update times
+    updateTimes();
   });
 }
 
 updateClock();
 setInterval(updateClock, 1000);
+// Update times every second without fetching
+setInterval(updateTimes, 1000);
 refresh();
 setInterval(refresh, 5000);
 </script>

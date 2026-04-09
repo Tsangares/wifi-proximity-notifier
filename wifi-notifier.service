@@ -6,8 +6,8 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/home/wil/Desktop/wifi-proximit-notifier
-ExecStart=/home/wil/Desktop/wifi-proximit-notifier/venv/bin/python3 app.py
+WorkingDirectory=/home/wil/Desktop/wifi-proximity-notifier
+ExecStart=/home/wil/Desktop/wifi-proximity-notifier/venv/bin/python3 app.py
 Restart=on-failure
 RestartSec=5
 Environment=DISPLAY=:0

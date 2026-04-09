@@ -42,8 +42,17 @@ def main():
     signal.signal(signal.SIGINT, shutdown)
     signal.signal(signal.SIGTERM, shutdown)
 
-    # Start scanner in background thread
-    scan_thread = threading.Thread(target=scanner.scan_loop, daemon=True)
+    # Start scanner in background thread with auto-restart
+    def scanner_wrapper():
+        while True:
+            try:
+                scanner.scan_loop()
+            except Exception as e:
+                log.error("Scanner crashed: %s — restarting in 3s", e, exc_info=True)
+                import time
+                time.sleep(3)
+
+    scan_thread = threading.Thread(target=scanner_wrapper, daemon=True)
     scan_thread.start()
     log.info("Scanner started")
 
