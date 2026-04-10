@@ -7,8 +7,6 @@ import threading
 import logging
 import argparse
 
-import scanner
-import manufacturer as mfr
 from dashboard import app
 
 logging.basicConfig(
@@ -25,10 +23,22 @@ def main():
     parser.add_argument("--host", default="0.0.0.0", help="Dashboard bind address")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     parser.add_argument("--no-dashboard", action="store_true", help="Run scanner only, no web UI")
+    parser.add_argument("--mock", action="store_true", help="Seed fake data and run dashboard without scanning (no root needed)")
     args = parser.parse_args()
 
     if args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
+
+    if args.mock:
+        from mock_data import seed_mock_data
+        log.info("Mock mode — seeding fake devices...")
+        seed_mock_data()
+        log.info("Dashboard at http://%s:%d", args.host, args.port)
+        app.run(host=args.host, port=args.port, debug=False, use_reloader=False)
+        return
+
+    import scanner
+    import manufacturer as mfr
 
     # Pre-initialize vendor DB so first scan has it ready
     log.info("Initializing vendor database...")

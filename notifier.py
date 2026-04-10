@@ -130,12 +130,13 @@ def _play_sound(connect=True):
             log.warning("paplay failed")
 
 
-def notify_new_device(mac, ip, manufacturer, device_type, is_returning=False):
+def notify_new_device(mac, ip, manufacturer, device_type, is_returning=False, custom_name=""):
     dtype = _clean_type(device_type)
+    display_name = custom_name or dtype
     if is_returning:
-        title = f"Device Connected: {dtype}"
+        title = f"Device Connected: {display_name}"
     else:
-        title = f"NEW DEVICE: {dtype}"
+        title = f"NEW DEVICE: {display_name}"
     body = f"{manufacturer}\nMAC: {mac}\nIP: {ip}"
 
     log.info("NOTIFY: %s — %s %s (%s) at %s", title, dtype, manufacturer, mac, ip)

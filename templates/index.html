@@ -240,6 +240,72 @@
   ::-webkit-scrollbar-thumb { background: #222235; border-radius: 4px; }
 
   .empty { color: #333345; font-size: 0.85em; text-align: center; padding: 30px 0; }
+
+  /* Identification breakdown panel */
+  .device-row { cursor: pointer; }
+  .device-row-header { cursor: default; }
+
+  .device-detail {
+    margin: 0 0 8px 0;
+    padding: 16px 20px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 12px;
+    animation: fadeIn 0.2s ease-out;
+  }
+  .detail-title {
+    font-size: 0.7em; text-transform: uppercase; letter-spacing: 1.5px;
+    color: #55556a; font-weight: 600; margin-bottom: 12px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .detail-pipeline {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 12px;
+  }
+  @media (max-width: 900px) {
+    .detail-pipeline { grid-template-columns: 1fr; }
+  }
+  .probe-stage {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    border-radius: 10px;
+    padding: 12px 14px;
+  }
+  .probe-stage.matched {
+    border-color: rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0.04);
+  }
+  .probe-stage-title {
+    font-size: 0.72em; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 1px; margin-bottom: 8px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .probe-stage.matched .probe-stage-title { color: #fff; }
+  .probe-stage:not(.matched) .probe-stage-title { color: #44445a; }
+  .probe-check { font-size: 10px; }
+  .probe-check.pass { color: #fff; }
+  .probe-check.fail { color: #44445a; }
+  .probe-item {
+    font-size: 0.78em; color: #8b8b9e; margin: 4px 0;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    word-break: break-all;
+  }
+  .probe-item.dim { color: #33334a; }
+  .probe-result {
+    font-size: 0.78em; color: #fff; font-weight: 600;
+    margin-top: 6px; padding-top: 6px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+  }
+  .btn-reprobe {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #8b8b9e; font-size: 0.7em; padding: 4px 12px;
+    border-radius: 6px; cursor: pointer; font-family: inherit;
+    text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;
+    transition: all 0.2s;
+  }
+  .btn-reprobe:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
 </style>
 </head>
 <body>
@@ -428,9 +494,14 @@ function diffUpdate(container, newDevices, rowFn) {
     if (oldRow) {
       // Row exists — only update if content changed (not time)
       if (oldRow.dataset.key !== d._key) {
+        // Preserve detail panel if expanded
+        const detail = oldRow.nextElementSibling;
+        const hasDetail = detail && detail.classList.contains('device-detail');
         tmp.innerHTML = d._html;
         const newRow = tmp.firstElementChild;
         container.replaceChild(newRow, oldRow);
+        // Re-insert detail panel after the new row
+        if (hasDetail) newRow.insertAdjacentElement('afterend', detail);
       } else {
         // Just update the time
         const timeEl = oldRow.querySelector('.device-time[data-ts]');
@@ -448,9 +519,12 @@ function diffUpdate(container, newDevices, rowFn) {
     }
   });
 
-  // Remove rows no longer in data
-  container.querySelectorAll('[data-mac]').forEach(row => {
+  // Remove rows no longer in data (but skip detail panels)
+  container.querySelectorAll('.device-row[data-mac]').forEach(row => {
     if (!newMacs.has(row.dataset.mac)) {
+      // Also remove associated detail panel
+      const detail = row.nextElementSibling;
+      if (detail && detail.classList.contains('device-detail')) detail.remove();
       row.style.opacity = '0';
       row.style.transition = 'opacity 0.2s';
       setTimeout(() => row.remove(), 200);
@@ -521,6 +595,183 @@ function refresh() {
     updateTimes();
   });
 }
+
+// Identification breakdown panel
+let expandedMac = null;
+
+function toggleDetail(e) {
+  const row = e.target.closest('.device-row');
+  if (!row || row.classList.contains('device-row-header')) return;
+  // Don't toggle if clicking on the name input
+  if (e.target.classList.contains('editable-name')) return;
+  const mac = row.dataset.mac;
+  if (!mac) return;
+
+  // Close existing panel
+  const existing = document.querySelector('.device-detail');
+  if (existing) {
+    const wasMac = existing.dataset.mac;
+    existing.remove();
+    if (wasMac === mac) { expandedMac = null; return; }
+  }
+
+  expandedMac = mac;
+  const panel = document.createElement('div');
+  panel.className = 'device-detail';
+  panel.dataset.mac = mac;
+  panel.innerHTML = '<div class="detail-title">Loading identification data...</div>';
+  row.insertAdjacentElement('afterend', panel);
+
+  fetch('/api/devices/' + encodeURIComponent(mac) + '/fingerprint')
+    .then(r => r.json())
+    .then(data => renderDetail(panel, mac, data));
+}
+
+function renderDetail(panel, mac, resp) {
+  const vendor = resp.manufacturer || 'Unknown';
+  const dtype = resp.device_type || 'Unknown';
+
+  if (resp.status === 'not_probed' || !resp.data) {
+    panel.innerHTML = `
+      <div class="detail-title">
+        Identification Pipeline
+        <button class="btn-reprobe" onclick="reprobe('${mac}')">Scan Now</button>
+      </div>
+      <div class="detail-pipeline">
+        <div class="probe-stage matched">
+          <div class="probe-stage-title"><span class="probe-check pass">&#10003;</span> MAC Vendor</div>
+          <div class="probe-item">${vendor}</div>
+          <div class="probe-result">${dtype}</div>
+        </div>
+        <div class="probe-stage">
+          <div class="probe-stage-title"><span class="probe-check fail">&#x2014;</span> Port Scan</div>
+          <div class="probe-item dim">Not yet scanned</div>
+        </div>
+        <div class="probe-stage">
+          <div class="probe-stage-title"><span class="probe-check fail">&#x2014;</span> Deep Probes</div>
+          <div class="probe-item dim">TLS / HTTP / mDNS / NetBIOS</div>
+        </div>
+      </div>`;
+    return;
+  }
+
+  const d = resp.data;
+  const idBy = d.identified_by;
+
+  // Port scan stage
+  const openPorts = (d.port_scan && d.port_scan.open) || [];
+  const checkedPorts = (d.port_scan && d.port_scan.ports_checked) || [];
+  const portMatched = openPorts.length > 0;
+
+  // Deep probe stages
+  const probes = [];
+
+  // TLS
+  if (d.tls_cert) {
+    const t = d.tls_cert;
+    probes.push({
+      name: 'TLS Cert',
+      port: t.port,
+      matched: !!t.identified_as,
+      isIdentifier: idBy === 'tls_cert',
+      detail: t.cert_text ? t.cert_text.substring(0, 120) : 'No cert data',
+      result: t.identified_as,
+    });
+  } else if (openPorts.some(p => [443,8443,4443,7443].includes(p))) {
+    probes.push({ name: 'TLS Cert', matched: false, detail: 'No cert returned', result: null });
+  }
+
+  // HTTP
+  if (d.http_banner) {
+    const h = d.http_banner;
+    const httpChecked = (h.ports_checked || []).length > 0;
+    if (httpChecked || h.identified_as) {
+      probes.push({
+        name: 'HTTP Banner',
+        matched: !!h.identified_as,
+        isIdentifier: idBy === 'http_banner',
+        detail: h.detail || ('Checked ports: ' + (h.ports_checked || []).join(', ')),
+        result: h.identified_as,
+      });
+    }
+  }
+
+  // mDNS
+  if (d.mdns) {
+    probes.push({
+      name: 'mDNS',
+      matched: !!d.mdns.hostname,
+      isIdentifier: idBy === 'mdns',
+      detail: d.mdns.hostname || 'No hostname resolved',
+      result: d.mdns.identified_as,
+    });
+  }
+
+  // NetBIOS
+  if (d.netbios) {
+    probes.push({
+      name: 'NetBIOS',
+      matched: !!d.netbios.name,
+      isIdentifier: idBy === 'netbios',
+      detail: d.netbios.name || 'No name found',
+      result: d.netbios.identified_as,
+    });
+  }
+
+  // If no deep probes ran at all
+  if (probes.length === 0) {
+    probes.push({ name: 'Deep Probes', matched: false, detail: 'No open probe ports', result: null });
+  }
+
+  // Build deep probes HTML
+  const probesHtml = probes.map(p => {
+    const cls = (p.matched || p.isIdentifier) ? 'matched' : '';
+    const icon = p.isIdentifier ? '<span class="probe-check pass">&#10003;</span>'
+               : p.matched ? '<span class="probe-check pass">&#8226;</span>'
+               : '<span class="probe-check fail">&#x2717;</span>';
+    const portStr = p.port ? ` :${p.port}` : '';
+    const resultHtml = p.result ? `<div class="probe-result">${p.result}</div>` : '';
+    return `<div class="probe-stage ${cls}">
+      <div class="probe-stage-title">${icon} ${p.name}${portStr}</div>
+      <div class="probe-item ${p.matched ? '' : 'dim'}">${p.detail}</div>
+      ${resultHtml}
+    </div>`;
+  }).join('');
+
+  const probedAt = d.probed_at ? new Date(d.probed_at).toLocaleString() : '';
+
+  panel.innerHTML = `
+    <div class="detail-title">
+      Identification Pipeline ${probedAt ? '<span style="font-weight:400;letter-spacing:0">Scanned ' + probedAt + '</span>' : ''}
+      <button class="btn-reprobe" onclick="reprobe('${mac}')">Re-scan</button>
+    </div>
+    <div class="detail-pipeline">
+      <div class="probe-stage matched">
+        <div class="probe-stage-title"><span class="probe-check pass">&#10003;</span> MAC Vendor</div>
+        <div class="probe-item">${vendor}</div>
+        <div class="probe-result">${dtype}</div>
+      </div>
+      <div class="probe-stage ${portMatched ? 'matched' : ''}">
+        <div class="probe-stage-title">${portMatched ? '<span class="probe-check pass">&#8226;</span>' : '<span class="probe-check fail">&#x2717;</span>'} Port Scan</div>
+        <div class="probe-item ${portMatched ? '' : 'dim'}">${openPorts.length ? 'Open: ' + openPorts.join(', ') : 'No open ports'}</div>
+        <div class="probe-item dim">Checked: ${checkedPorts.join(', ')}</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        ${probesHtml}
+      </div>
+    </div>`;
+}
+
+function reprobe(mac) {
+  fetch('/api/devices/' + encodeURIComponent(mac) + '/reprobe', { method: 'POST' });
+  const panel = document.querySelector(`.device-detail[data-mac="${mac}"]`);
+  if (panel) {
+    panel.querySelector('.detail-title').innerHTML = 'Re-scanning device... results will appear shortly.';
+  }
+}
+
+// Attach click handlers to device list containers (event delegation)
+document.addEventListener('click', toggleDetail);
 
 updateClock();
 setInterval(updateClock, 1000);

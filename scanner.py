@@ -1,228 +1,45 @@
+"""Network scanner — orchestrates device discovery and disconnect detection."""
+
 import subprocess
 import re
 import time
+import json
 import logging
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 
 import device_db
 import manufacturer as mfr
 import notifier
+import net
+import fingerprint
 
 log = logging.getLogger(__name__)
 
 # Timing config
 FAST_SCAN_INTERVAL = 3       # seconds between fast ARP sweeps
 DETAIL_SCAN_INTERVAL = 30    # seconds between nmap sweeps (hostnames)
-MISSING_PROBE_AFTER = 5      # seconds — start active probing after not REACHABLE this long
-DISCONNECT_PROBE_COUNT = 3   # number of failed arping probes before declaring gone
+DISCONNECT_PROBE_COUNT = 5   # number of failed arping probes before declaring gone
+DISCONNECT_PROBE_SLEEP = 0.3 # seconds between arping probes
+STALE_TIMEOUT = 60           # seconds in STALE (not REACHABLE) before probing
+ABSENT_TIMEOUT = 120         # seconds absent from ARP before probing (sleeping device grace)
 NEW_DEVICE_WINDOW = 120      # seconds — if unseen for this long, treat as "new" again
-RECONNECT_GRACE = 15         # seconds — suppress re-notification if device was gone < this
+RECONNECT_GRACE = 90         # seconds — suppress re-notification if device was gone < this
+
+# Flap dampening — suppress notifications for devices that keep bouncing
+FLAP_WINDOW = 600            # track disconnects within this many seconds
+FLAP_THRESHOLD = 2           # disconnects in window before suppressing
+FLAP_SUPPRESS_TIME = 300     # seconds — clear flap history after genuine absence this long
 
 # State tracking
-_last_seen = {}       # mac -> datetime of last scan that saw it (any ARP state)
-_last_reachable = {}  # mac -> datetime of last REACHABLE state
+_last_seen = {}       # mac -> datetime of last scan that saw it (REACHABLE only)
+_last_reachable = {}  # mac -> datetime of last REACHABLE state (same as _last_seen now)
 _disconnect_ts = {}   # mac -> datetime when we marked it disconnected
 _notified_new = {}    # mac -> datetime of last "new device" notification
+_flap_history = {}    # mac -> list of recent disconnect datetimes
 _lock = threading.Lock()
 _running = False
-
-
-def _arping_check(ip):
-    """Single ARP probe — layer 2, works even on sleeping devices."""
-    try:
-        result = subprocess.run(
-            ["arping", "-c", "1", "-w", "1", ip],
-            capture_output=True, timeout=3,
-        )
-        return result.returncode == 0
-    except Exception:
-        return False
-
-
-def _parse_arp_scan_fast():
-    """Quick arp-scan for connect detection. Returns set of (mac, ip)."""
-    devices = set()
-    try:
-        out = subprocess.check_output(
-            ["arp-scan", "--localnet", "--retry=1", "--timeout=100"],
-            text=True, timeout=5, stderr=subprocess.DEVNULL,
-        )
-        for line in out.strip().split("\n"):
-            match = re.match(r"^(\d+\.\d+\.\d+\.\d+)\s+([0-9a-f:]{17})", line, re.I)
-            if match:
-                devices.add((match.group(2).lower(), match.group(1)))
-    except Exception:
-        pass
-    return devices
-
-
-def _arp_sweep():
-    """Quick arp-scan to populate ARP table with all live devices. Blocks until done."""
-    try:
-        subprocess.run(
-            ["arp-scan", "--localnet", "--retry=1", "--timeout=200"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            timeout=5,
-        )
-    except Exception:
-        pass
-
-
-def _parse_ip_neigh():
-    """Parse 'ip neigh' for MAC/IP pairs. Returns (all_devices, reachable_devices)."""
-    all_devices = set()
-    reachable = set()
-    try:
-        out = subprocess.check_output(["ip", "neigh"], text=True, timeout=5)
-        for line in out.strip().split("\n"):
-            if not line:
-                continue
-            parts = line.split()
-            ip = parts[0]
-            if ip.startswith("fe80:") or ip.startswith("ff"):
-                continue
-            if "lladdr" in parts:
-                idx = parts.index("lladdr")
-                mac = parts[idx + 1].lower()
-                state = parts[-1] if len(parts) > idx + 2 else ""
-                if state not in ("FAILED", "INCOMPLETE"):
-                    all_devices.add((mac, ip))
-                if state == "REACHABLE":
-                    reachable.add((mac, ip))
-    except Exception as e:
-        log.warning("ip neigh failed: %s", e)
-    return all_devices, reachable
-
-
-def _parse_arp_scan():
-    """Run arp-scan --localnet. Layer 2 — all devices MUST respond."""
-    devices = set()
-    try:
-        out = subprocess.check_output(
-            ["arp-scan", "--localnet", "--retry=2", "--timeout=300"],
-            text=True, timeout=15, stderr=subprocess.DEVNULL,
-        )
-        for line in out.strip().split("\n"):
-            match = re.match(r"^(\d+\.\d+\.\d+\.\d+)\s+([0-9a-f:]{17})", line, re.I)
-            if match:
-                ip = match.group(1)
-                mac = match.group(2).lower()
-                devices.add((mac, ip))
-    except FileNotFoundError:
-        log.debug("arp-scan not installed, skipping")
-    except Exception as e:
-        log.warning("arp-scan failed: %s", e)
-    return devices
-
-
-def _parse_nmap_scan(subnet="10.0.0.0/24"):
-    """Run nmap ping sweep. Returns set of (mac, ip) and dict of mac->hostname."""
-    devices = set()
-    hostnames = {}
-    try:
-        out = subprocess.check_output(
-            ["nmap", "-sn", subnet, "--host-timeout", "5s"],
-            text=True, timeout=45, stderr=subprocess.DEVNULL,
-        )
-        current_ip = None
-        current_hostname = ""
-        for line in out.strip().split("\n"):
-            ip_match = re.search(r"Nmap scan report for\s+(\S+)\s*\(?(\d+\.\d+\.\d+\.\d+)\)?", line)
-            if ip_match:
-                hostname_or_ip = ip_match.group(1)
-                current_ip = ip_match.group(2)
-                if hostname_or_ip != current_ip:
-                    current_hostname = hostname_or_ip.rstrip(".")
-                else:
-                    current_hostname = ""
-            mac_match = re.search(r"MAC Address:\s+([0-9A-Fa-f:]{17})", line)
-            if mac_match and current_ip:
-                mac = mac_match.group(1).lower()
-                devices.add((mac, current_ip))
-                if current_hostname:
-                    hostnames[mac] = current_hostname
-                current_ip = None
-                current_hostname = ""
-    except FileNotFoundError:
-        log.debug("nmap not installed, skipping")
-    except Exception as e:
-        log.warning("nmap scan failed: %s", e)
-    return devices, hostnames
-
-
-def _detect_subnet():
-    """Detect the local subnet from ip route."""
-    try:
-        out = subprocess.check_output(["ip", "route"], text=True, timeout=5)
-        for line in out.split("\n"):
-            if "scope link" in line and "/" in line.split()[0]:
-                return line.split()[0]
-    except Exception:
-        pass
-    return "10.0.0.0/24"
-
-
-def _resolve_hostname(ip):
-    """Try DNS reverse lookup for an IP."""
-    try:
-        import socket
-        hostname = socket.gethostbyaddr(ip)[0]
-        if hostname and not hostname.startswith(ip):
-            return hostname
-    except Exception:
-        pass
-    return ""
-
-
-def _identify_by_hostname(hostname):
-    """Identify device type from hostname string."""
-    if not hostname:
-        return None
-    h = hostname.lower()
-    if "iphone" in h:
-        return "iPhone"
-    if "ipad" in h:
-        return "iPad"
-    if "macbook" in h:
-        return "MacBook"
-    if "imac" in h:
-        return "iMac"
-    if "appletv" in h or "apple-tv" in h:
-        return "Apple TV"
-    if "android" in h:
-        return "Android"
-    if "galaxy" in h:
-        return "Android (Samsung Galaxy)"
-    if "pixel" in h:
-        return "Android (Pixel)"
-    if "windows" in h or "desktop-" in h or "laptop-" in h:
-        return "Windows Desktop"
-    if "raspberrypi" in h:
-        return "Raspberry Pi"
-    if "tasmota" in h or "esp8266" in h or "esp32" in h:
-        return "IoT (Tasmota)"
-    if "onn" in h or "streaming" in h:
-        return "Android TV"
-    if "vizio" in h or "casttv" in h or "smartcast" in h:
-        return "TV (Vizio)"
-    if "brw" in h and h.startswith("brw"):
-        return "Printer"
-    return None
-
-
-def _get_own_mac():
-    """Get our own MAC so we can skip it."""
-    try:
-        out = subprocess.check_output(["ip", "link", "show"], text=True, timeout=5)
-        macs = set()
-        for line in out.split("\n"):
-            m = re.search(r"link/ether\s+([0-9a-f:]{17})", line)
-            if m:
-                macs.add(m.group(1).lower())
-        return macs
-    except Exception:
-        return set()
 
 
 def _process_scan_results(found_devices, hostnames=None, alive_macs=None, reachable_macs=None, silent=False):
@@ -237,13 +54,16 @@ def _process_scan_results(found_devices, hostnames=None, alive_macs=None, reacha
     if reachable_macs is None:
         reachable_macs = alive_macs
     now = datetime.now()
-    own_macs = _get_own_mac()
+    own_macs = net.get_own_mac()
+    own_ips = net.get_own_ip()
 
     with _lock:
         seen_macs = set()
 
         for mac, ip in found_devices:
             if mac in own_macs:
+                continue
+            if ip in own_ips:
                 continue
             if mac == "ff:ff:ff:ff:ff:ff":
                 continue
@@ -255,16 +75,14 @@ def _process_scan_results(found_devices, hostnames=None, alive_macs=None, reacha
             if mac in alive_macs:
                 _last_seen[mac] = now
 
-            # Resolve hostname
+            # Use cached hostname from detail scan; skip blocking DNS in fast loop
             hostname = hostnames.get(mac, "")
-            if not hostname:
-                hostname = _resolve_hostname(ip)
 
             # Get manufacturer info
             vendor, dtype = mfr.lookup(mac)
 
             # Override device type if hostname gives us better info
-            hostname_type = _identify_by_hostname(hostname)
+            hostname_type = mfr.identify_by_hostname(hostname)
             if hostname_type:
                 dtype = hostname_type
 
@@ -278,93 +96,226 @@ def _process_scan_results(found_devices, hostnames=None, alive_macs=None, reacha
                 log.info("NEW DEVICE: %s (%s) [%s] %s - %s", mac, ip, hostname, vendor, dtype)
                 if not silent:
                     notifier.notify_new_device(mac, ip, vendor, dtype)
+                fingerprint.queue_probe(mac, ip)
 
             elif not device["is_active"]:
+                # Only reconnect if device is confirmed alive (REACHABLE or arp-scan),
+                # not just lingering as STALE in the ARP cache.
+                # Exception: silent (first) scan re-activates everything without notifications.
+                if not silent and mac not in alive_macs:
+                    continue
+
                 device_db.upsert_device(mac, ip, vendor, dtype, hostname)
                 device_db.log_event(mac, "connect", ip)
+
+                # Re-probe if device was never fingerprinted
+                if not device.get("last_probed"):
+                    fingerprint.queue_probe(mac, ip)
 
                 disc_time = _disconnect_ts.get(mac)
                 if disc_time and (now - disc_time).total_seconds() < RECONNECT_GRACE:
                     log.debug("Quick reconnect (< %ds), suppressing notification for %s",
                               RECONNECT_GRACE, mac)
                 else:
-                    _notified_new[mac] = now
-                    if not silent:
-                        notifier.notify_new_device(mac, ip,
-                                                   device.get("manufacturer", vendor),
-                                                   device.get("device_type", dtype),
-                                                   is_returning=True)
+                    # Clear flap history if device was gone long enough (genuine return)
+                    if disc_time and (now - disc_time).total_seconds() >= FLAP_SUPPRESS_TIME:
+                        _flap_history.pop(mac, None)
+
+                    # Suppress reconnect notification for flapping devices
+                    flap_times = _flap_history.get(mac, [])
+                    recent_flaps = [t for t in flap_times
+                                    if (now - t).total_seconds() < FLAP_WINDOW]
+                    if len(recent_flaps) >= FLAP_THRESHOLD:
+                        log.debug("Suppressing reconnect notification for flapping device %s", mac)
+                    else:
+                        _notified_new[mac] = now
+                        if not silent:
+                            notifier.notify_new_device(mac, ip,
+                                                       device.get("manufacturer", vendor),
+                                                       device.get("device_type", dtype),
+                                                       is_returning=True,
+                                                       custom_name=device.get("custom_name", ""))
             else:
                 device_db.upsert_device(mac, ip,
                                         device.get("manufacturer", "Unknown"),
                                         device.get("device_type", "Unknown"),
                                         hostname)
 
-        # Check for disconnections
-        db_active = {d["mac"]: d for d in device_db.get_active_devices()}
+        # Mark seen devices as not-disconnecting
+        for mac in seen_macs:
+            _disconnect_ts.pop(mac, None)
+
+    # Queue disconnect checks OUTSIDE the lock (does DB queries, runs async)
+    if not silent:
+        _queue_disconnect_checks(seen_macs, now)
+
+
+_disconnect_executor = ThreadPoolExecutor(max_workers=8)
+_disconnect_pending = set()  # MACs currently being probed
+_pending_lock = threading.Lock()
+
+
+def _queue_disconnect_checks(seen_macs, now):
+    """Find missing devices and probe them in background threads."""
+    db_active = {d["mac"]: d for d in device_db.get_active_devices()}
+    with _lock:
         all_tracked = set(_last_seen.keys()) | set(db_active.keys())
 
-        for mac in all_tracked:
-            if mac in seen_macs:
-                # Device is in ARP table (any state) or found by arp-scan — alive
-                _disconnect_ts.pop(mac, None)
+    for mac in all_tracked:
+        if mac in seen_macs:
+            continue
+        with _pending_lock:
+            if mac in _disconnect_pending:
                 continue
 
-            # Seed _last_seen from DB for devices we haven't seen since restart
-            if mac not in _last_seen:
-                device = db_active.get(mac) or device_db.get_device(mac)
-                if device:
-                    try:
-                        _last_seen[mac] = datetime.fromisoformat(device["last_seen"])
-                    except Exception:
-                        _last_seen[mac] = now
-                else:
-                    continue
-
+        if mac not in _last_seen:
             device = db_active.get(mac) or device_db.get_device(mac)
-            if not device or not device["is_active"]:
+            if device:
+                try:
+                    _last_seen[mac] = datetime.fromisoformat(device["last_seen"])
+                except Exception:
+                    _last_seen[mac] = now
+            else:
                 continue
 
-            ip = device.get("ip", "")
-            elapsed = (now - _last_seen[mac]).total_seconds()
+        device = db_active.get(mac) or device_db.get_device(mac)
+        if not device or not device["is_active"]:
+            continue
 
-            if ip:
-                # Device missing — rapid-fire arping to confirm
-                alive = False
-                for probe in range(DISCONNECT_PROBE_COUNT):
-                    if _arping_check(ip):
-                        alive = True
-                        break
-                    time.sleep(1)
+        # Grace period: don't probe until device has been absent long enough.
+        # Sleeping phones drop from ARP quickly (gc_stale_time=5s) but wake up
+        # within a couple minutes — wait before declaring them gone.
+        with _lock:
+            last = _last_seen.get(mac)
+        if last and (now - last).total_seconds() < ABSENT_TIMEOUT:
+            continue
 
-                if alive:
-                    _last_seen[mac] = now
-                    log.debug("arping confirmed %s (%s) still alive", mac, ip)
+        ip = device.get("ip", "")
+        if ip:
+            with _pending_lock:
+                _disconnect_pending.add(mac)
+            _disconnect_executor.submit(_probe_disconnect, mac, ip, device)
+
+
+def _probe_disconnect(mac, ip, device):
+    """Probe a single device for disconnect (runs in thread pool)."""
+    try:
+        for probe in range(DISCONNECT_PROBE_COUNT):
+            if net.arping_check(ip):
+                with _lock:
+                    _last_seen[mac] = datetime.now()
+                log.debug("arping confirmed %s (%s) still alive", mac, ip)
+                return
+
+            time.sleep(DISCONNECT_PROBE_SLEEP)
+
+        # Device is gone — mark inactive BEFORE clearing pending flag
+        # so the next scan cycle can't submit a duplicate probe
+        now = datetime.now()
+        with _lock:
+            elapsed = (now - _last_seen.get(mac, now)).total_seconds()
+            _disconnect_ts[mac] = now
+
+        device_db.mark_inactive(mac)
+        device_db.log_event(mac, "disconnect", ip)
+        log.info("DISCONNECT: %s (%s) confirmed gone after %d probes, %ds",
+                 mac, device.get("manufacturer", ""), DISCONNECT_PROBE_COUNT, int(elapsed))
+
+        # Flap dampening — track recent disconnects and suppress if flapping
+        with _lock:
+            if mac not in _flap_history:
+                _flap_history[mac] = []
+            _flap_history[mac] = [t for t in _flap_history[mac]
+                                  if (now - t).total_seconds() < FLAP_WINDOW]
+            _flap_history[mac].append(now)
+            is_flapping = len(_flap_history[mac]) >= FLAP_THRESHOLD
+
+        if is_flapping:
+            log.info("Suppressing disconnect notification for flapping device %s "
+                     "(%d disconnects in %ds)", mac, len(_flap_history[mac]), FLAP_WINDOW)
+        else:
+            notifier.notify_device_left(
+                mac, ip,
+                device.get("manufacturer", "Unknown"),
+                device.get("device_type", "Unknown"),
+                device.get("custom_name", ""),
+            )
+    except Exception as e:
+        log.error("Disconnect probe error for %s: %s", mac, e)
+    finally:
+        with _pending_lock:
+            _disconnect_pending.discard(mac)
+
+
+def _check_stale_devices(stale_devices):
+    """Probe devices stuck in STALE that haven't been REACHABLE recently."""
+    now = datetime.now()
+    for mac, ip in stale_devices:
+        with _lock:
+            last = _last_seen.get(mac)
+            if not last:
+                # Never been REACHABLE since startup — seed from DB so timeout can start
+                device = device_db.get_device(mac)
+                if device and device.get("last_seen"):
+                    try:
+                        last = datetime.fromisoformat(device["last_seen"])
+                    except Exception:
+                        last = now
                 else:
-                    # All probes failed — device is gone
-                    device_db.mark_inactive(mac)
-                    device_db.log_event(mac, "disconnect", ip)
-                    _disconnect_ts[mac] = now
-                    log.info("DISCONNECT: %s (%s) confirmed gone after %d probes, %ds",
-                             mac, device.get("manufacturer", ""), DISCONNECT_PROBE_COUNT, int(elapsed))
-                    if not silent:
-                        notifier.notify_device_left(
-                            mac, ip,
-                            device.get("manufacturer", "Unknown"),
-                            device.get("device_type", "Unknown"),
-                            device.get("custom_name", ""),
-                        )
+                    last = now
+                _last_seen[mac] = last
+        elapsed = (now - last).total_seconds()
+        if elapsed < STALE_TIMEOUT:
+            continue
+        device = device_db.get_device(mac)
+        if not device or not device["is_active"]:
+            continue
+        with _pending_lock:
+            if mac in _disconnect_pending:
+                continue
+            _disconnect_pending.add(mac)
+        log.debug("Device %s STALE for %ds, probing...", mac, int(elapsed))
+        _disconnect_executor.submit(_probe_disconnect, mac, ip, device)
+
+
+_WEAK_DEVICE_TYPES = {
+    "Phone/Tablet (MAC Randomized)", "Unknown", "Other",
+    "Randomized MAC",
+}
+
+
+def _update_from_mdns_services(mdns_results):
+    """Improve identification of poorly-identified active devices using mDNS services."""
+    if not mdns_results:
+        return
+    for device in device_db.get_active_devices():
+        if device["device_type"] not in _WEAK_DEVICE_TYPES:
+            continue
+        ip = device.get("ip", "")
+        if not ip or ip not in mdns_results:
+            continue
+        services = mdns_results[ip]
+        dtype, name, svc_list = fingerprint.identify_from_mdns_services(
+            services, device["mac"]
+        )
+        if dtype:
+            log.info("mDNS identified %s (%s) as %s [%s]",
+                     device["mac"], ip, dtype, name)
+            device_db.update_fingerprint(
+                device["mac"], dtype, name,
+                json.dumps({"mdns_services": svc_list}, default=str),
+            )
 
 
 def scan_loop():
     """Main scanning loop."""
     global _running
     _running = True
-    subnet = _detect_subnet()
+    subnet = net.detect_subnet()
     log.info("Starting scanner on subnet %s", subnet)
-    log.info("Timings: fast=%ds, detail=%ds, probe_after=%ds, probe_count=%d, new_window=%ds, grace=%ds",
-             FAST_SCAN_INTERVAL, DETAIL_SCAN_INTERVAL, MISSING_PROBE_AFTER,
-             DISCONNECT_PROBE_COUNT, NEW_DEVICE_WINDOW, RECONNECT_GRACE)
+    log.info("Timings: fast=%ds, detail=%ds, probe_count=%d, probe_sleep=%.1fs, stale_timeout=%ds, grace=%ds",
+             FAST_SCAN_INTERVAL, DETAIL_SCAN_INTERVAL,
+             DISCONNECT_PROBE_COUNT, DISCONNECT_PROBE_SLEEP, STALE_TIMEOUT, RECONNECT_GRACE)
 
     # Shorten ARP stale time so disconnects are detected faster
     try:
@@ -385,30 +336,54 @@ def scan_loop():
     # Detail scanner thread: arp-scan + nmap (slow but thorough)
     detail_results = {"devices": set(), "hostnames": {}, "time": 0}
     detail_lock = threading.Lock()
+    FULL_SWEEP_INTERVAL = 300  # full /24 nmap every 5 minutes for new device discovery
 
     def detail_loop():
+        last_full_sweep = 0
         while _running:
+            start = time.time()
             try:
-                arp_devices = _parse_arp_scan()
-                nmap_devices, hostnames = _parse_nmap_scan(subnet)
+                arp_devices = net.parse_arp_scan()
+
+                # Targeted nmap: scan only known device IPs for hostname refresh
+                # Full /24 sweep every 5 minutes for new device discovery
+                known_ips = list({d["ip"] for d in device_db.get_all_devices()
+                                  if d["ip"] and not d["ip"].startswith("0.")})
+                if time.time() - last_full_sweep >= FULL_SWEEP_INTERVAL:
+                    log.debug("Running full /24 nmap sweep for discovery")
+                    nmap_devices, hostnames = net.parse_nmap_scan(subnet)
+                    last_full_sweep = time.time()
+                elif known_ips:
+                    nmap_devices, hostnames = net.parse_nmap_scan(targets=known_ips)
+                else:
+                    nmap_devices, hostnames = set(), {}
+
+                # mDNS service browsing — identifies phones and smart devices
+                mdns_services = net.mdns_browse(timeout=10)
+
                 with detail_lock:
                     detail_results["devices"] = arp_devices | nmap_devices
                     detail_results["hostnames"] = hostnames
+                    detail_results["mdns_services"] = mdns_services
                     detail_results["time"] = time.time()
             except Exception as e:
                 log.error("Detail scan error: %s", e, exc_info=True)
-            time.sleep(DETAIL_SCAN_INTERVAL)
+            elapsed = time.time() - start
+            remaining = max(0, DETAIL_SCAN_INTERVAL - elapsed)
+            time.sleep(remaining)
 
     detail_thread = threading.Thread(target=detail_loop, daemon=True)
     detail_thread.start()
 
+    fingerprint.start()
+
     while _running:
         try:
             # 1. Read passive ARP table (no probing)
-            arp_all, arp_reachable = _parse_ip_neigh()
+            arp_all, arp_reachable, arp_stale = net.parse_ip_neigh()
 
             # 2. Quick arp-scan for CONNECT detection (finds new devices)
-            fast_arp = _parse_arp_scan_fast()
+            fast_arp = net.parse_arp_scan_fast()
 
             # 3. Track reachable state (only from passive ARP, not from our probes)
             now = datetime.now()
@@ -419,16 +394,27 @@ def scan_loop():
             with detail_lock:
                 hostnames = dict(detail_results["hostnames"])
 
-            # All devices seen this cycle (for connect detection)
+            # All devices seen this cycle (for connect detection + DB updates)
             all_devices = arp_all | fast_arp | detail_results.get("devices", set())
 
-            # Only passive ARP counts for "alive" (disconnect detection)
-            log.debug("Scan: %d passive (%d reachable) + %d fast_arp = %d total",
-                      len(arp_all), len(arp_reachable), len(fast_arp), len(all_devices))
+            # Only REACHABLE refreshes _last_seen (not STALE — STALE is unconfirmed)
+            log.debug("Scan: %d passive (%d reachable, %d stale) + %d fast_arp = %d total",
+                      len(arp_all), len(arp_reachable), len(arp_stale), len(fast_arp), len(all_devices))
             _process_scan_results(all_devices, hostnames,
-                                  alive_macs={m for m, _ in arp_all},
+                                  alive_macs={m for m, _ in arp_reachable},
                                   reachable_macs={m for m, _ in arp_reachable},
                                   silent=first_scan)
+
+            # Probe stale devices that haven't been REACHABLE for STALE_TIMEOUT
+            if not first_scan:
+                _check_stale_devices(arp_stale)
+
+            # Try to improve identification of poorly-identified devices via mDNS
+            with detail_lock:
+                mdns_services = detail_results.get("mdns_services", {})
+            if mdns_services and not first_scan:
+                _update_from_mdns_services(mdns_services)
+
             first_scan = False
 
         except Exception as e:
@@ -440,3 +426,4 @@ def scan_loop():
 def stop():
     global _running
     _running = False
+    fingerprint.stop()

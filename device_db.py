@@ -42,11 +42,21 @@ def _init_tables(conn):
         CREATE INDEX IF NOT EXISTS idx_activity_ts ON activity_log(timestamp DESC);
         CREATE INDEX IF NOT EXISTS idx_activity_mac ON activity_log(mac);
     """)
-    # Migrate: add hostname column if missing
+    # Migrate: add columns if missing
     cols = {r[1] for r in conn.execute("PRAGMA table_info(devices)").fetchall()}
     if "hostname" not in cols:
         conn.execute("ALTER TABLE devices ADD COLUMN hostname TEXT DEFAULT ''")
         conn.commit()
+    if "last_probed" not in cols:
+        conn.execute("ALTER TABLE devices ADD COLUMN last_probed TEXT DEFAULT ''")
+        conn.commit()
+    if "fingerprint_data" not in cols:
+        conn.execute("ALTER TABLE devices ADD COLUMN fingerprint_data TEXT DEFAULT ''")
+        conn.commit()
+    # Clean up bad data from nmap parsing bug (hostname="1", ip="0.0.0.x")
+    conn.execute("UPDATE devices SET hostname = '' WHERE hostname = '1'")
+    conn.execute("UPDATE devices SET ip = '' WHERE ip LIKE '0.0.0.%'")
+    conn.commit()
 
 
 def upsert_device(mac, ip, manufacturer="Unknown", device_type="Unknown", hostname=""):
@@ -63,12 +73,13 @@ def upsert_device(mac, ip, manufacturer="Unknown", device_type="Unknown", hostna
         return True  # new device
     else:
         conn.execute(
-            "UPDATE devices SET ip = ?, "
+            "UPDATE devices SET "
+            "ip = CASE WHEN ? NOT LIKE '0.%' THEN ? ELSE ip END, "
             "hostname = CASE WHEN ? != '' THEN ? ELSE hostname END, "
             "manufacturer = CASE WHEN ? != 'Unknown' THEN ? ELSE manufacturer END, "
             "device_type = CASE WHEN ? != 'Unknown' THEN ? ELSE device_type END, "
             "last_seen = ?, is_active = 1 WHERE mac = ?",
-            (ip, hostname, hostname, manufacturer, manufacturer, device_type, device_type, now, mac),
+            (ip, ip, hostname, hostname, manufacturer, manufacturer, device_type, device_type, now, mac),
         )
         conn.commit()
         return False  # existing device
@@ -139,3 +150,27 @@ def get_device(mac):
     conn = _get_conn()
     row = conn.execute("SELECT * FROM devices WHERE mac = ?", (mac,)).fetchone()
     return dict(row) if row else None
+
+
+def update_fingerprint(mac, device_type=None, extra_info="", fingerprint_data=""):
+    """Update a device's identification from deep probing results."""
+    conn = _get_conn()
+    now = datetime.now().isoformat()
+    if device_type:
+        conn.execute(
+            "UPDATE devices SET device_type = ?, last_probed = ?, fingerprint_data = ? WHERE mac = ?",
+            (device_type, now, fingerprint_data, mac),
+        )
+    else:
+        conn.execute(
+            "UPDATE devices SET last_probed = ?, fingerprint_data = ? WHERE mac = ?",
+            (now, fingerprint_data, mac),
+        )
+    conn.commit()
+
+
+def clear_last_probed(mac):
+    """Clear last_probed so device can be re-fingerprinted."""
+    conn = _get_conn()
+    conn.execute("UPDATE devices SET last_probed = '' WHERE mac = ?", (mac,))
+    conn.commit()

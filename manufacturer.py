@@ -98,3 +98,39 @@ def lookup(mac):
                 return vendor, dtype
 
     return vendor, "Other"
+
+
+def identify_by_hostname(hostname):
+    """Identify device type from hostname string."""
+    if not hostname:
+        return None
+    h = hostname.lower()
+    if "iphone" in h:
+        return "iPhone"
+    if "ipad" in h:
+        return "iPad"
+    if "macbook" in h:
+        return "MacBook"
+    if "imac" in h:
+        return "iMac"
+    if "appletv" in h or "apple-tv" in h:
+        return "Apple TV"
+    if "android" in h:
+        return "Android"
+    if "galaxy" in h:
+        return "Android (Samsung Galaxy)"
+    if "pixel" in h:
+        return "Android (Pixel)"
+    if "windows" in h or "desktop-" in h or "laptop-" in h:
+        return "Windows Desktop"
+    if "raspberrypi" in h:
+        return "Raspberry Pi"
+    if "tasmota" in h or "esp8266" in h or "esp32" in h:
+        return "IoT (Tasmota)"
+    if "onn" in h or "streaming" in h:
+        return "Android TV"
+    if "vizio" in h or "casttv" in h or "smartcast" in h:
+        return "TV (Vizio)"
+    if "brw" in h and h.startswith("brw"):
+        return "Printer"
+    return None
