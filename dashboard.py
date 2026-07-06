@@ -5,6 +5,18 @@ import fingerprint
 
 app = Flask(__name__)
 
+CANONICAL_TYPES_FALLBACK = [
+    "phone", "tablet", "laptop", "desktop", "tv", "console",
+    "iot", "network", "printer", "speaker", "watch", "camera", "unknown",
+]
+OS_VALUES = ["iOS", "Android", "Windows", "macOS", "Linux", "tvOS", "embedded", ""]
+
+
+@app.before_request
+def _check_auth():
+    # Future: bearer-token check goes here.
+    return None
+
 
 @app.route("/")
 def index():
@@ -13,9 +25,17 @@ def index():
 
 @app.route("/api/devices")
 def api_devices():
-    active = device_db.get_active_devices()
-    inactive = device_db.get_inactive_devices()
-    return jsonify({"active": active, "inactive": inactive})
+    return jsonify({"devices": device_db.get_devices_view()})
+
+
+@app.route("/api/meta")
+def api_meta():
+    try:
+        from identity import CANONICAL_TYPES
+        types = list(CANONICAL_TYPES)
+    except ImportError:
+        types = CANONICAL_TYPES_FALLBACK
+    return jsonify({"types": types, "os_values": OS_VALUES})
 
 
 @app.route("/api/devices/<mac>/rename", methods=["POST"])
@@ -23,6 +43,31 @@ def api_rename(mac):
     data = request.get_json(force=True)
     name = data.get("name", "").strip()
     device_db.rename_device(mac, name)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/devices/<mac>/update", methods=["POST"])
+def api_update(mac):
+    data = request.get_json(force=True) or {}
+    try:
+        from identity import CANONICAL_TYPES
+        canonical_types = set(CANONICAL_TYPES)
+    except ImportError:
+        canonical_types = set(CANONICAL_TYPES_FALLBACK)
+
+    name = data.get("name")
+    dtype = data.get("type")
+    owner = data.get("owner")
+
+    if dtype is not None and dtype != "" and dtype not in canonical_types:
+        return jsonify({"ok": False, "error": "invalid type"}), 400
+
+    if name is not None:
+        name = name.strip()
+    if owner is not None:
+        owner = owner.strip()
+
+    device_db.update_device_user_fields(mac, name=name, dtype=dtype, owner=owner)
     return jsonify({"ok": True})
 
 

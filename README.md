@@ -1,6 +1,6 @@
 # WiFi Proximity Notifier
 
-A daemon that watches your local network and tells you when devices show up or leave. Sends desktop notifications with sound and runs a live dashboard.
+A daemon that watches your local network and tells you when devices show up or leave. Sends desktop notifications with sound and runs a live dashboard — an advanced version of your router's device list, with consistent labeling, OS/manufacturer identification, and activity history.
 
 ![Dashboard](docs/dashboard.png)
 
@@ -11,16 +11,29 @@ A daemon that watches your local network and tells you when devices show up or l
 
 ```
   ip monitor neigh (live) ───────┐
-  arp-scan (every 10s)  ─────────┼──> Process ──> Notify + Dashboard
+  arp-scan (every 10s)  ─────────┼──> Process ──> Identity engine ──> Notify + Dashboard
   ip neigh (ARP table) ──────────┘       │
                                          ├── New device? → notification + chirp
   nmap (every 30s) ──────────────────────┤── Device gone? → arping probes → confirm → notify
-                                         └── Update dashboard + SQLite DB
+  mDNS / TLS / HTTP / NetBIOS probes ────┘── Evidence → canonical labels → SQLite DB
 ```
 
-Connect detection is mostly passive: a persistent `ip monitor neigh` subprocess streams kernel ARP table transitions live, so a new or returning device is picked up in near real time instead of waiting for a poll. A 10-second poll (`arp-scan` + the kernel ARP table) still runs as a fallback/reconcile pass — it covers the initial snapshot on startup and catches anything the passive stream misses (dropped netlink message, monitor process restart). When a device drops out of the ARP table, rapid `arping` probes confirm it's actually gone before sending a disconnect notification. This avoids false alarms for sleeping phones — iPhones and iPads ignore ICMP pings but still respond to ARP.
+Connect detection is mostly passive: a persistent `ip monitor neigh` subprocess streams kernel ARP table transitions live, so a new or returning device is picked up in near real time instead of waiting for a poll. A 10-second poll (`arp-scan` + the kernel ARP table) still runs as a fallback/reconcile pass. When a device drops out of the ARP table, rapid `arping` probes confirm it's actually gone before sending a disconnect notification — this avoids false alarms for sleeping phones, which ignore ICMP pings but still respond to ARP.
 
-Device identification comes from the MAC vendor database, mDNS/DNS hostname lookups, and randomized-MAC detection (the locally-administered bit).
+## Device identity engine
+
+Every device is resolved to four canonical fields, each with a confidence score and provenance (which evidence source asserted it):
+
+- **display name** — best human name (mDNS advertised name, hostname, NetBIOS, or a vendor-based composite)
+- **device type** — one of: phone, tablet, laptop, desktop, tv, console, iot, network, printer, speaker, watch, camera, unknown
+- **OS guess** — iOS, Android, Windows, macOS, Linux, tvOS, or embedded
+- **manufacturer** — OUI registry vendor, or evidence-derived for randomized MACs
+
+Evidence sources, strongest first: your manual edits > mDNS services / TLS certs / HTTP banners > mDNS/NetBIOS/DNS hostnames > OUI vendor inference > legacy free-text guesses. Resolution is deterministic — the same evidence always produces the same labels, so names never flip-flop between rescans. Names, types, and owners you set by hand are never overwritten by any automatic process.
+
+Randomized (private) MACs get flagged with a badge and labeled "Private device xx:xx" unless mDNS or a hostname gives them a stable identity. When the ruleset improves (`identity.ENGINE_VERSION` bump), every stored device is re-resolved at startup from its accumulated evidence — no history is lost.
+
+See `plans/device-identity-engine.md` for the design.
 
 ## Install
 
@@ -82,7 +95,7 @@ sudo ./venv/bin/python3 app.py --debug
 # Scanner only, no web UI
 sudo ./venv/bin/python3 app.py --no-dashboard
 
-# Demo mode — fake devices, no root needed
+# Demo mode — fake devices, separate mock.db, no root needed
 python3 app.py --mock
 ```
 
@@ -90,36 +103,50 @@ python3 app.py --mock
 
 Open `http://localhost:5555`.
 
-The top panel shows phones and tablets. Below that, a bento grid splits other online devices from offline ones, with stats and an activity feed on the right. Click any device name to rename it. Everything refreshes every 5 seconds without page flicker (DOM diffing).
+A router-style device list: every device shows its type icon, name, ONLINE/OFFLINE state, IP, MAC (with a PRIVATE MAC badge for randomized addresses), manufacturer, OS, first/last seen, and connection count. Filter chips (Online / New / Needs labeling / Private MAC), free-text search, and sorting. Click a name to rename it; set a canonical type or an owner inline — your edits are sacred and survive every rescan. The "Needs labeling" view queues up devices you haven't named yet. Clicking a device's type icon shows *why* it was identified that way (per-field source and confidence). The activity timeline shows connects and disconnects grouped by day.
 
-The UI uses text labels (ONLINE/OFFLINE), solid vs dashed borders, and brightness differences instead of relying on color alone.
+The UI uses text labels (ONLINE/OFFLINE, JOINED/LEFT), solid vs dashed borders, distinct shapes, and brightness differences instead of relying on color alone. It refreshes every 5 seconds without page flicker (DOM diffing) and collapses to stacked cards on a phone screen.
+
+### Access from other devices (LAN / Tailscale)
+
+The dashboard binds to `0.0.0.0` by default, so it's reachable from your home LAN and, if the machine runs Tailscale, from your tailnet:
+
+- from a phone on the tailnet with MagicDNS: `http://taxi:5555`
+- or by Tailscale IP: `http://100.83.247.91:5555`
+
+Tradeoff: binding all interfaces means anyone on your LAN can view the device list (it exposes MACs, IPs, and names — but no control over your network). There is no auth yet; `dashboard.py` has a single `before_request` hook where a bearer-token check can be added later. To restrict access, set `WIFI_NOTIFIER_HOST=127.0.0.1` (or pass `--host`) in the service environment.
 
 ## API
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/devices` | GET | All devices (active + inactive) |
+| `/api/devices` | GET | `{"devices": [...]}` — all devices with resolved identity, confidence/provenance, connection counts |
 | `/api/devices/<mac>/rename` | POST | Rename a device `{"name": "My Phone"}` |
+| `/api/devices/<mac>/update` | POST | Set user fields `{"name": ..., "type": ..., "owner": ...}` (type must be canonical, or `""` to clear the override) |
+| `/api/devices/<mac>/fingerprint` | GET | Raw deep-probe evidence for a device |
+| `/api/devices/<mac>/reprobe` | POST | Queue a device for re-fingerprinting |
 | `/api/activity?limit=50` | GET | Recent activity log |
+| `/api/meta` | GET | Canonical device types and OS values |
 
 ## Tuning
 
 Edit the timing constants at the top of `scanner.py`:
 
 ```python
-FAST_SCAN_INTERVAL = 10      # seconds between fallback/reconcile ARP sweeps (connect detection is mostly passive now)
+FAST_SCAN_INTERVAL = 10      # seconds between fallback/reconcile ARP sweeps (connect detection is mostly passive)
 DETAIL_SCAN_INTERVAL = 30    # seconds between nmap hostname sweeps
-DISCONNECT_PROBE_COUNT = 2   # failed arping probes before declaring gone
-DISCONNECT_PROBE_SLEEP = 0.1 # seconds between probes
-RECONNECT_GRACE = 15         # suppress re-notification if gone < this long
+DISCONNECT_PROBE_COUNT = 5   # failed arping probes before declaring gone
+DISCONNECT_PROBE_SLEEP = 0.3 # seconds between probes
+RECONNECT_GRACE = 90         # suppress re-notification if gone < this long
 ```
+
+Dashboard bind address/port: `--host`/`--port` flags or `WIFI_NOTIFIER_HOST`/`WIFI_NOTIFIER_PORT` env vars.
 
 ## Mock mode
 
-`python3 app.py --mock` seeds the database with a dozen fake devices and starts the dashboard without scanning. No root needed. Useful for trying out the UI or regenerating the screenshot:
+`python3 app.py --mock` seeds a **separate** database (`mock.db` — it never touches your real device history) with 16 fake devices, runs the identity engine over them, and starts the dashboard without scanning. No root needed. Useful for trying out the UI or regenerating the screenshots:
 
 ```bash
-pip install playwright && playwright install chromium
 python3 app.py --mock --port 5556 &
 python3 ~/.claude/skills/screenshot/capture.py \
     --url http://localhost:5556 \
@@ -134,17 +161,20 @@ kill %1
 ## Project layout
 
 ```
-app.py              Entry point. Starts scanner thread + Flask dashboard.
+app.py              Entry point. Identity backfill, scanner thread + Flask dashboard.
 scanner.py          Scan loop, state tracking, disconnect detection.
-net.py              Network tool wrappers (arp-scan, nmap, arping, ip neigh).
+net.py              Network tool wrappers (arp-scan, nmap, arping, ip neigh, ip monitor).
 fingerprint.py      Background device probing (TLS certs, HTTP banners, mDNS, NetBIOS).
+identity.py         Pure identity-resolution engine (evidence → canonical labels).
+resolver.py         Glue: builds evidence from DB rows, persists resolutions, backfill.
 device_db.py        SQLite database (~/.local/share/wifi-notifier/devices.db).
-manufacturer.py     MAC vendor lookup and device type inference.
+manufacturer.py     MAC vendor lookup (OUI) and randomized-MAC detection.
 notifier.py         Desktop notifications via gdbus + sound via paplay.
 dashboard.py        Flask routes.
-mock_data.py        Fake device data for --mock mode.
+mock_data.py        Fake device data for --mock mode (separate mock.db).
 templates/          Dashboard HTML.
 static/             Connect/disconnect sound files.
+plans/              Design docs.
 ```
 
 ### bandwidth_monitor.py — separate tool, not part of the daemon
@@ -158,8 +188,8 @@ source venv/bin/activate
 python3 -m unittest discover -s tests -v
 ```
 
-Covers the `ip monitor neigh` line parser and subprocess-restart behavior (`tests/test_neigh_monitor.py`, offline — no root or live network needed) and an end-to-end check of the passive-connect path through `_process_scan_results` against a throwaway SQLite DB (`tests/test_passive_connect_integration.py`).
+Covers the `ip monitor neigh` line parser and subprocess-restart behavior, an end-to-end check of the passive-connect path against a throwaway SQLite DB, and the identity engine (evidence fusion, priority ordering, user-override protection, determinism/idempotence, private-MAC handling, DB-row evidence building) — all offline, no root or live network needed.
 
 ## Data
 
-Device data lives in `~/.local/share/wifi-notifier/devices.db` (SQLite). It contains MAC addresses, IPs, and device names. This file is gitignored.
+Device data lives in `~/.local/share/wifi-notifier/devices.db` (SQLite). It contains MAC addresses, IPs, and device names. This file is gitignored. Mock mode uses `mock.db` in the same directory; `WIFI_NOTIFIER_DB` overrides the path. Schema migrations are additive — upgrading never discards accumulated history, and identity re-resolution keeps all stored evidence and user edits.

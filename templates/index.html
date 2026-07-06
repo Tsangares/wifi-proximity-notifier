@@ -21,40 +21,41 @@
     background: #0a0a0f;
     color: #e0e0e8;
     min-height: 100vh;
+    overflow-x: hidden;
   }
 
   body::before {
     content: '';
     position: fixed; top: 0; left: 0; right: 0; bottom: 0;
     background:
-      radial-gradient(ellipse at 20% 50%, rgba(0, 240, 255, 0.03) 0%, transparent 50%),
-      radial-gradient(ellipse at 80% 20%, rgba(168, 85, 247, 0.03) 0%, transparent 50%);
+      radial-gradient(ellipse at 20% 50%, rgba(0, 240, 255, 0.05) 0%, transparent 50%),
+      radial-gradient(ellipse at 80% 20%, rgba(168, 85, 247, 0.05) 0%, transparent 50%);
     pointer-events: none; z-index: 0;
   }
 
   .container {
     max-width: 1400px;
     margin: 0 auto;
-    padding: 24px 20px;
+    padding: 20px 20px 60px;
     position: relative; z-index: 1;
   }
 
   .header {
-    display: flex; align-items: center; gap: 14px; margin-bottom: 28px;
+    display: flex; align-items: center; gap: 14px; margin-bottom: 20px;
   }
   .header-icon {
     width: 40px; height: 40px;
     background: linear-gradient(135deg, #00f0ff, #a855f7);
     border-radius: 12px;
     display: flex; align-items: center; justify-content: center;
-    font-size: 20px;
+    font-size: 20px; flex-shrink: 0;
   }
   .header h1 {
     font-size: 1.5em; font-weight: 700; color: #e0e0e8;
   }
   .header-time {
     margin-left: auto; color: #55556a; font-size: 0.8em;
-    font-variant-numeric: tabular-nums;
+    font-variant-numeric: tabular-nums; white-space: nowrap;
   }
 
   .card {
@@ -63,25 +64,25 @@
     border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 16px;
     padding: 20px;
-    transition: border-color 0.3s;
-  }
-
-  .bento {
-    display: grid;
-    grid-template-columns: 1fr 300px;
-    gap: 16px;
   }
 
   /* Stats row */
-  .stats { display: flex; gap: 16px; flex-direction: column; }
-  .stat-card { text-align: center; padding: 24px 20px; }
+  .stats-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  .stat-card { text-align: center; padding: 18px 12px; }
   .stat-num {
-    font-size: 2.8em; font-weight: 800; line-height: 1; margin-bottom: 4px;
+    font-size: 2.2em; font-weight: 800; line-height: 1; margin-bottom: 4px;
     color: #fff;
+    background: linear-gradient(135deg, #00f0ff, #a855f7);
+    -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
   }
   .stat-label {
-    color: #6b6b80; font-size: 0.75em; text-transform: uppercase;
-    letter-spacing: 1.5px; font-weight: 600;
+    color: #6b6b80; font-size: 0.7em; text-transform: uppercase;
+    letter-spacing: 1.2px; font-weight: 600;
   }
 
   .section-title {
@@ -94,84 +95,178 @@
     border-radius: 10px; color: #8b8b9e;
   }
 
-  /* Device rows */
+  /* Controls: filter chips + search + sort */
+  .controls {
+    display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+    margin-bottom: 14px;
+  }
+  .chip-row {
+    display: flex; gap: 8px; overflow-x: auto; flex: 1 1 auto;
+    -webkit-overflow-scrolling: touch; scrollbar-width: none;
+    padding-bottom: 2px;
+  }
+  .chip-row::-webkit-scrollbar { display: none; }
+  .chip {
+    flex-shrink: 0;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: #8b8b9e; font-size: 0.75em; font-weight: 600;
+    padding: 8px 14px; border-radius: 20px; cursor: pointer;
+    white-space: nowrap; transition: all 0.15s;
+    display: inline-flex; align-items: center; gap: 6px;
+    min-height: 36px;
+  }
+  .chip:hover { background: rgba(255, 255, 255, 0.08); color: #cfcfe0; }
+  .chip.active {
+    background: rgba(255, 255, 255, 0.14);
+    border-color: rgba(255, 255, 255, 0.35);
+    color: #fff;
+  }
+  .chip .chip-count {
+    background: rgba(255, 255, 255, 0.1);
+    padding: 1px 6px; border-radius: 8px; font-size: 0.9em;
+  }
+  .chip.active .chip-count { background: rgba(255, 255, 255, 0.22); }
+
+  .search-input {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: #e0e0e8; font-size: 0.85em; padding: 8px 14px;
+    border-radius: 20px; outline: none; font-family: inherit;
+    min-width: 160px; min-height: 36px;
+  }
+  .search-input:focus { border-color: rgba(0, 240, 255, 0.4); background: rgba(255, 255, 255, 0.06); }
+  .search-input::placeholder { color: #44445a; }
+
+  .sort-row {
+    display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px;
+    align-items: center;
+  }
+  .sort-label {
+    font-size: 0.7em; text-transform: uppercase; letter-spacing: 1px;
+    color: #44445a; font-weight: 600; margin-right: 4px;
+  }
+  .sort-btn {
+    background: transparent; border: 1px solid rgba(255, 255, 255, 0.06);
+    color: #6b6b80; font-size: 0.72em; font-weight: 600;
+    padding: 6px 11px; border-radius: 14px; cursor: pointer; font-family: inherit;
+    transition: all 0.15s; min-height: 32px;
+  }
+  .sort-btn:hover { color: #cfcfe0; border-color: rgba(255, 255, 255, 0.15); }
+  .sort-btn.active {
+    color: #00f0ff; border-color: rgba(0, 240, 255, 0.35);
+    background: rgba(0, 240, 255, 0.06);
+  }
+
+  /* Device rows (router-style advanced list) */
   .device-list { display: flex; flex-direction: column; gap: 4px; }
 
   .device-row {
     display: grid;
-    grid-template-columns: auto 1fr 1fr 1fr 90px;
-    gap: 12px; align-items: center;
-    padding: 10px 14px; border-radius: 10px;
+    grid-template-columns: 74px minmax(140px,1.5fr) minmax(120px,1fr) minmax(90px,0.8fr) minmax(120px,1fr) minmax(110px,0.95fr);
+    gap: 10px; align-items: center;
+    padding: 12px 14px; border-radius: 10px;
     transition: background 0.2s;
     animation: fadeIn 0.3s ease-out;
     border-left: 3px solid transparent;
   }
   .device-row:hover { background: rgba(255, 255, 255, 0.03); }
   .device-row-header {
-    padding: 6px 14px 10px; color: #44445a; font-size: 0.7em;
+    padding: 4px 14px 10px; color: #44445a; font-size: 0.68em;
     text-transform: uppercase; letter-spacing: 1px; font-weight: 600;
     border-left: 3px solid transparent;
   }
   .device-row-header:hover { background: transparent; }
 
-  /* ONLINE row: bright, thick left border, full opacity */
   .device-row.online {
     border-left: 3px solid #fff;
     background: rgba(255, 255, 255, 0.025);
   }
-
-  /* OFFLINE row: dim, dashed left border, reduced opacity */
   .device-row.offline {
     border-left: 3px dashed #333345;
-    opacity: 0.45;
+    opacity: 0.5;
   }
-  .device-row.offline:hover { opacity: 0.7; }
+  .device-row.offline:hover { opacity: 0.75; }
 
-  /* Status badge — text label, not just a dot */
+  .cell { min-width: 0; }
+  .cell-status { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; }
+
+  .type-icon-btn {
+    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 8px; width: 34px; height: 34px; font-size: 16px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; position: relative; flex-shrink: 0;
+    color: inherit; font-family: inherit;
+  }
+  .type-icon-btn:hover { background: rgba(255,255,255,0.1); }
+  .type-icon-btn .info-dot {
+    position: absolute; top: -3px; right: -3px;
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #00f0ff; border: 1px solid #0a0a0f;
+  }
+
   .status-badge {
     display: inline-flex; align-items: center; gap: 5px;
-    padding: 3px 10px; border-radius: 20px;
-    font-size: 0.7em; font-weight: 700; text-transform: uppercase;
+    padding: 3px 9px; border-radius: 20px;
+    font-size: 0.66em; font-weight: 700; text-transform: uppercase;
     letter-spacing: 0.5px; white-space: nowrap;
   }
   .status-badge.online {
-    background: rgba(255, 255, 255, 0.12);
-    color: #fff;
+    background: rgba(255, 255, 255, 0.12); color: #fff;
     border: 1px solid rgba(255, 255, 255, 0.2);
   }
   .status-badge.online .badge-dot {
-    width: 6px; height: 6px; border-radius: 50%;
-    background: #fff;
+    width: 6px; height: 6px; border-radius: 50%; background: #fff;
     animation: pulse 1.5s ease-in-out infinite;
   }
   .status-badge.offline {
-    background: rgba(255, 255, 255, 0.03);
-    color: #555;
+    background: rgba(255, 255, 255, 0.03); color: #555;
     border: 1px dashed #333;
   }
   .status-badge.offline .badge-dot {
-    width: 6px; height: 6px;
-    background: transparent;
-    border: 1px solid #444;
-    border-radius: 50%;
+    width: 6px; height: 6px; background: transparent;
+    border: 1px solid #444; border-radius: 50%;
   }
+  .badge {
+    display: inline-flex; align-items: center;
+    padding: 2px 7px; border-radius: 10px;
+    font-size: 0.62em; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.5px; white-space: nowrap;
+  }
+  .badge.new {
+    background: rgba(0, 240, 255, 0.12); color: #00f0ff;
+    border: 1px solid rgba(0, 240, 255, 0.35);
+  }
+  .badge.private {
+    background: rgba(168, 85, 247, 0.1); color: #c996fb;
+    border: 1px dashed rgba(168, 85, 247, 0.4);
+  }
+  .badge-stack { display: flex; gap: 4px; flex-wrap: wrap; }
 
   .device-name-wrap { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .name-line { display: flex; align-items: center; gap: 5px; }
+  .you-dot {
+    width: 5px; height: 5px; border-radius: 50%; background: #a855f7;
+    flex-shrink: 0; display: inline-block;
+  }
   .device-secondary {
     font-size: 0.75em; color: #55556a;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
-  .device-type { font-size: 0.82em; color: #a0a0b8; font-weight: 500; }
-  .device-mfr { font-size: 0.78em; color: #55556a; }
+  .device-type-label { font-size: 0.82em; color: #a0a0b8; font-weight: 500; }
+  .device-mfr { font-size: 0.75em; color: #55556a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .device-os { font-size: 0.75em; color: #6b6b80; }
   .device-mac {
     font-family: 'SF Mono', 'Fira Code', monospace;
-    font-size: 0.75em; color: #44445a;
+    font-size: 0.74em; color: #44445a;
   }
   .device-ip {
     font-family: 'SF Mono', 'Fira Code', monospace;
-    font-size: 0.8em; color: #6b6b80;
+    font-size: 0.78em; color: #6b6b80;
   }
-  .device-time { font-size: 0.78em; color: #55556a; text-align: right; }
+  .device-time { font-size: 0.76em; color: #6b6b80; }
+  .device-time-sub { font-size: 0.7em; color: #44445a; }
+  .device-conn { font-size: 0.7em; color: #44445a; margin-top: 2px; }
 
   .editable-name {
     background: transparent; border: 1px solid transparent;
@@ -181,58 +276,74 @@
   }
   .editable-name::placeholder { color: #333345; font-weight: 400; }
   .editable-name:hover { border-color: rgba(255, 255, 255, 0.08); }
-  .editable-name:focus {
-    border-color: rgba(255, 255, 255, 0.2);
-    background: rgba(255, 255, 255, 0.03);
+  .editable-name:focus { border-color: rgba(255, 255, 255, 0.2); background: rgba(255, 255, 255, 0.03); }
+  .offline .editable-name { color: #888; }
+
+  .editable-owner {
+    background: transparent; border: 1px solid transparent;
+    color: #a0a0b8; padding: 2px 6px; margin: -2px -6px;
+    border-radius: 6px; font-size: 0.8em; font-family: inherit;
+    width: 100%; outline: none; transition: border-color 0.2s, background 0.2s;
   }
-  .offline .editable-name { color: #666; }
+  .editable-owner::placeholder { color: #333345; }
+  .editable-owner:hover { border-color: rgba(255, 255, 255, 0.08); }
+  .editable-owner:focus { border-color: rgba(255, 255, 255, 0.2); background: rgba(255, 255, 255, 0.03); }
+
+  .type-select {
+    background: rgba(255,255,255,0.03); border: 1px solid transparent;
+    color: #a0a0b8; font-size: 0.78em; font-family: inherit;
+    padding: 3px 4px; margin: -3px -4px; border-radius: 6px;
+    max-width: 100%; outline: none; cursor: pointer;
+  }
+  .type-select:hover { border-color: rgba(255,255,255,0.08); }
+  .type-select:focus { border-color: rgba(255,255,255,0.2); }
+  .type-select option { background: #14141c; color: #e0e0e8; }
+
+  .cell-label-mobile { display: none; }
 
   /* Activity feed */
   .activity-feed {
-    max-height: 520px; overflow-y: auto;
+    max-height: 560px; overflow-y: auto;
     display: flex; flex-direction: column; gap: 0;
     scrollbar-width: thin; scrollbar-color: #222235 transparent;
   }
+  .activity-day-header {
+    font-size: 0.68em; text-transform: uppercase; letter-spacing: 1.2px;
+    color: #33334a; font-weight: 700; padding: 12px 12px 6px;
+  }
+  .activity-day-header:first-child { padding-top: 2px; }
   .activity-item {
     display: flex; align-items: flex-start; gap: 10px;
-    padding: 10px 12px; border-radius: 8px; transition: background 0.2s;
+    padding: 9px 12px; border-radius: 8px; transition: background 0.2s;
   }
   .activity-item:hover { background: rgba(255, 255, 255, 0.02); }
 
-  /* Activity icons: arrow shapes instead of colored dots */
   .activity-icon {
-    width: 22px; height: 22px; border-radius: 6px;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 12px; font-weight: 900; flex-shrink: 0; margin-top: 1px;
+    width: 44px; text-align: center;
+    font-size: 11px; font-weight: 900; flex-shrink: 0; margin-top: 2px;
+    letter-spacing: 0.3px;
   }
-  .activity-icon.connect {
-    background: rgba(255, 255, 255, 0.1);
-    color: #fff;
-    border: 1px solid rgba(255, 255, 255, 0.15);
-  }
-  .activity-icon.disconnect {
-    background: transparent;
-    color: #555;
-    border: 1px dashed #333;
-  }
+  .activity-icon.connect { color: #fff; }
+  .activity-icon.disconnect { color: #555; }
 
   .activity-info { flex: 1; min-width: 0; }
   .activity-event { font-size: 0.8em; font-weight: 600; }
   .activity-event.connect { color: #fff; }
-  .activity-event.disconnect { color: #555; }
+  .activity-event.disconnect { color: #666; }
   .activity-device {
     font-size: 0.75em; color: #55556a;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   .activity-time { font-size: 0.7em; color: #44445a; white-space: nowrap; margin-top: 2px; }
 
-  @media (max-width: 900px) {
-    .bento { grid-template-columns: 1fr; }
-    .stats { flex-direction: row; }
-    .stat-card { flex: 1; }
-    .device-row { grid-template-columns: auto 1fr 1fr; }
-    .device-row .col-mac, .device-row .col-time,
-    .device-row-header .col-mac, .device-row-header .col-time { display: none; }
+  /* Phones highlight panel */
+  #phones-card { margin-bottom: 16px; }
+  #phones-card.empty-hide { display: none; }
+
+  .layout-grid {
+    display: grid;
+    grid-template-columns: 1fr 380px;
+    gap: 16px;
   }
 
   ::-webkit-scrollbar { width: 4px; }
@@ -241,10 +352,7 @@
 
   .empty { color: #333345; font-size: 0.85em; text-align: center; padding: 30px 0; }
 
-  /* Identification breakdown panel */
-  .device-row { cursor: pointer; }
-  .device-row-header { cursor: default; }
-
+  /* Detail / identity panel */
   .device-detail {
     margin: 0 0 8px 0;
     padding: 16px 20px;
@@ -257,29 +365,32 @@
     font-size: 0.7em; text-transform: uppercase; letter-spacing: 1.5px;
     color: #55556a; font-weight: 600; margin-bottom: 12px;
     display: flex; align-items: center; justify-content: space-between;
+    gap: 10px; flex-wrap: wrap;
   }
-  .detail-pipeline {
-    display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
-    gap: 12px;
+  .identity-fields { display: flex; flex-direction: column; gap: 8px; }
+  .identity-field {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    font-size: 0.8em; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.04);
   }
-  @media (max-width: 900px) {
-    .detail-pipeline { grid-template-columns: 1fr; }
+  .identity-key {
+    color: #55556a; text-transform: uppercase; font-size: 0.75em;
+    letter-spacing: 0.8px; font-weight: 700; min-width: 100px;
   }
+  .identity-val { color: #e0e0e8; font-weight: 600; }
+  .identity-src {
+    color: #6b6b80; font-size: 0.85em; margin-left: auto;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+  .detail-pipeline { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+  @media (max-width: 900px) { .detail-pipeline { grid-template-columns: 1fr; } }
   .probe-stage {
-    background: rgba(255, 255, 255, 0.02);
-    border: 1px solid rgba(255, 255, 255, 0.04);
-    border-radius: 10px;
-    padding: 12px 14px;
+    background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.04);
+    border-radius: 10px; padding: 12px 14px;
   }
-  .probe-stage.matched {
-    border-color: rgba(255, 255, 255, 0.15);
-    background: rgba(255, 255, 255, 0.04);
-  }
+  .probe-stage.matched { border-color: rgba(255, 255, 255, 0.15); background: rgba(255, 255, 255, 0.04); }
   .probe-stage-title {
     font-size: 0.72em; font-weight: 700; text-transform: uppercase;
-    letter-spacing: 1px; margin-bottom: 8px;
-    display: flex; align-items: center; gap: 6px;
+    letter-spacing: 1px; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;
   }
   .probe-stage.matched .probe-stage-title { color: #fff; }
   .probe-stage:not(.matched) .probe-stage-title { color: #44445a; }
@@ -288,24 +399,49 @@
   .probe-check.fail { color: #44445a; }
   .probe-item {
     font-size: 0.78em; color: #8b8b9e; margin: 4px 0;
-    font-family: 'SF Mono', 'Fira Code', monospace;
-    word-break: break-all;
+    font-family: 'SF Mono', 'Fira Code', monospace; word-break: break-all;
   }
   .probe-item.dim { color: #33334a; }
   .probe-result {
     font-size: 0.78em; color: #fff; font-weight: 600;
-    margin-top: 6px; padding-top: 6px;
-    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    margin-top: 6px; padding-top: 6px; border-top: 1px solid rgba(255, 255, 255, 0.06);
   }
-  .btn-reprobe {
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+  .btn-reprobe, .btn-diag {
+    background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.1);
     color: #8b8b9e; font-size: 0.7em; padding: 4px 12px;
     border-radius: 6px; cursor: pointer; font-family: inherit;
     text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;
     transition: all 0.2s;
   }
-  .btn-reprobe:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
+  .btn-reprobe:hover, .btn-diag:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
+  .btn-diag { text-transform: none; font-size: 0.68em; padding: 4px 8px; }
+
+  @media (max-width: 900px) {
+    .layout-grid { grid-template-columns: 1fr; }
+    .stats-row { grid-template-columns: repeat(2, 1fr); }
+  }
+
+  @media (max-width: 700px) {
+    .container { padding: 14px 10px 60px; }
+    .device-row-header { display: none; }
+    .device-row {
+      display: flex; flex-direction: column; align-items: stretch; gap: 8px;
+      padding: 14px; border-radius: 12px;
+    }
+    .cell-status { flex-direction: row; align-items: center; justify-content: space-between; }
+    .cell[data-label] { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .cell-label-mobile {
+      display: inline-block; font-size: 0.65em; text-transform: uppercase;
+      letter-spacing: 1px; color: #44445a; font-weight: 700; flex-shrink: 0;
+    }
+    .type-icon-btn, .btn-diag, .chip, .sort-btn { min-height: 40px; }
+    .editable-name, .editable-owner, .type-select, .search-input { min-height: 40px; }
+    .device-name-wrap { width: 100%; }
+    .cell-address { flex-direction: column; align-items: flex-start !important; }
+    .cell-address .addr-values { text-align: right; }
+  }
+
+  .why-hint { font-size: 0.6em; color: #33334a; margin-top: 2px; }
 </style>
 </head>
 <body>
@@ -317,58 +453,53 @@
     <div class="header-time" id="clock"></div>
   </div>
 
-  <!-- Phones panel -->
-  <div class="card" id="phones-card" style="margin-bottom: 16px;">
-    <div class="section-title">Phones &amp; Tablets <span class="count" id="phones-badge">0</span></div>
-    <div class="device-list">
-      <div class="device-row device-row-header">
-        <div>Status</div>
-        <div>Device</div>
-        <div>Type</div>
-        <div class="col-mac">Address</div>
-        <div class="col-time">Seen</div>
-      </div>
-      <div id="phones-list"></div>
+  <div class="stats-row">
+    <div class="card stat-card">
+      <div class="stat-num" id="stat-online">0</div>
+      <div class="stat-label">Online Now</div>
+    </div>
+    <div class="card stat-card">
+      <div class="stat-num" id="stat-total">0</div>
+      <div class="stat-label">Total Known</div>
+    </div>
+    <div class="card stat-card">
+      <div class="stat-num" id="stat-new">0</div>
+      <div class="stat-label">New (24h)</div>
+    </div>
+    <div class="card stat-card">
+      <div class="stat-num" id="stat-needs">0</div>
+      <div class="stat-label">Needs Labeling</div>
     </div>
   </div>
 
-  <div class="bento">
-    <div class="card" id="active-card">
-      <div class="section-title">Other Devices <span class="count" id="active-badge">0</span></div>
+  <!-- Phones panel: online personal devices highlighted -->
+  <div class="card" id="phones-card">
+    <div class="section-title">Personal Devices Online <span class="count" id="phones-badge">0</span></div>
+    <div class="device-list" id="phones-list"></div>
+  </div>
+
+  <div class="layout-grid">
+    <div class="card">
+      <div class="section-title">All Devices <span class="count" id="main-badge">0</span></div>
+
+      <div class="controls">
+        <div class="chip-row" id="chip-row"></div>
+        <input class="search-input" id="search-box" type="text" placeholder="Search name, IP, MAC, vendor&hellip;">
+      </div>
+      <div class="sort-row" id="sort-row">
+        <span class="sort-label">Sort</span>
+      </div>
+
       <div class="device-list">
         <div class="device-row device-row-header">
           <div>Status</div>
           <div>Device</div>
           <div>Type</div>
-          <div class="col-mac">Address</div>
-          <div class="col-time">Seen</div>
+          <div>Owner</div>
+          <div>Address</div>
+          <div>Activity</div>
         </div>
-        <div id="active-list"></div>
-      </div>
-    </div>
-
-    <div class="stats">
-      <div class="card stat-card">
-        <div class="stat-num" id="active-count">0</div>
-        <div class="stat-label">Online Now</div>
-      </div>
-      <div class="card stat-card">
-        <div class="stat-num" id="total-count">0</div>
-        <div class="stat-label">Total Known</div>
-      </div>
-    </div>
-
-    <div class="card" id="past-card">
-      <div class="section-title">Offline Devices <span class="count" id="past-badge">0</span></div>
-      <div class="device-list">
-        <div class="device-row device-row-header">
-          <div>Status</div>
-          <div>Device</div>
-          <div>Type</div>
-          <div class="col-mac">Address</div>
-          <div class="col-time">Last Seen</div>
-        </div>
-        <div id="past-list"></div>
+        <div id="device-list-main"></div>
       </div>
     </div>
 
@@ -381,253 +512,327 @@
 </div>
 
 <script>
+// ---------------------------------------------------------------------
+// Constants & state
+// ---------------------------------------------------------------------
+const TYPE_ICONS = {
+  phone: '\u{1F4F1}', tablet: '\u{1F532}', laptop: '\u{1F4BB}', desktop: '\u{1F5A5}️',
+  tv: '\u{1F4FA}', console: '\u{1F3AE}', iot: '\u{1F50C}', network: '\u{1F4F6}',
+  printer: '\u{1F5A8}️', speaker: '\u{1F50A}', watch: '\u{231A}', camera: '\u{1F4F7}',
+  unknown: '❔',
+};
+const PERSONAL_TYPES = ['phone', 'tablet', 'watch'];
+
+let allDevices = [];
+let deviceByMac = {};
+let metaTypes = ['phone','tablet','laptop','desktop','tv','console','iot','network','printer','speaker','watch','camera','unknown'];
+let currentFilter = 'all';
+let searchQuery = '';
+let sortState = { key: 'last_seen', dir: 'desc' };
+let openPanel = null; // { mac, type: 'identity' | 'fingerprint' }
+let lastActivityIds = '';
+
+const SORT_OPTIONS = [
+  { key: 'last_seen', label: 'Last seen', defaultDir: 'desc' },
+  { key: 'name', label: 'Name', defaultDir: 'asc' },
+  { key: 'first_seen', label: 'First seen', defaultDir: 'desc' },
+  { key: 'ip', label: 'IP', defaultDir: 'asc' },
+  { key: 'connections', label: 'Connections', defaultDir: 'desc' },
+];
+
+const FILTER_OPTIONS = [
+  { key: 'all', label: 'All' },
+  { key: 'online', label: 'Online' },
+  { key: 'new', label: 'New' },
+  { key: 'needs', label: 'Needs labeling' },
+  { key: 'private', label: 'Private MAC' },
+];
+
+// ---------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------
+function escapeHtml(s) {
+  if (s === null || s === undefined) return '';
+  return String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 function timeAgo(iso) {
   if (!iso) return '';
   const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
   if (s < 5) return 'just now';
   if (s < 60) return s + 's ago';
-  if (s < 3600) return Math.floor(s/60) + 'm ago';
-  if (s < 86400) return Math.floor(s/3600) + 'h ago';
-  return Math.floor(s/86400) + 'd ago';
+  if (s < 3600) return Math.floor(s / 60) + 'm ago';
+  if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+  return Math.floor(s / 86400) + 'd ago';
 }
 
-function fmtTime(iso) {
+function fmtExact(iso) {
   if (!iso) return '';
   return new Date(iso).toLocaleString();
 }
 
-function deviceRow(d, active) {
-  const statusCls = active ? 'online' : 'offline';
-  const statusLabel = active ? 'ONLINE' : 'OFFLINE';
-  const badge = `<span class="status-badge ${statusCls}"><span class="badge-dot"></span>${statusLabel}</span>`;
-
-  const displayName = d.custom_name || '';
-  const nameInput = `<input class="editable-name" value="${displayName}" placeholder="${d.device_type}" data-mac="${d.mac}" onchange="rename(this)" onfocus="this.select()">`;
-  const secondary = d.ip || '';
-
-  // data-key is a stable fingerprint of the row content (excluding time)
-  const key = `${d.mac}|${statusCls}|${displayName}|${d.device_type}|${d.ip}`;
-
-  return `<div class="device-row ${statusCls}" data-mac="${d.mac}" data-key="${key}">
-    ${badge}
-    <div class="device-name-wrap">
-      ${nameInput}
-      <div class="device-secondary">${secondary}</div>
-    </div>
-    <div>
-      <div class="device-type">${d.device_type}</div>
-      <div class="device-mfr">${d.manufacturer}</div>
-    </div>
-    <div class="col-mac">
-      <div class="device-ip">${d.ip || ''}</div>
-      <div class="device-mac">${d.mac}</div>
-    </div>
-    <div class="col-time device-time" data-ts="${d.last_seen}">${timeAgo(d.last_seen)}</div>
-  </div>`;
+function dayLabel(iso) {
+  const d = new Date(iso);
+  const now = new Date();
+  const startOf = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diffDays = Math.round((startOf(now) - startOf(d)) / 86400000);
+  if (diffDays === 0) return 'Today';
+  if (diffDays === 1) return 'Yesterday';
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
 }
 
-function activityItem(a) {
-  const cls = a.event === 'connect' ? 'connect' : 'disconnect';
-  const icon = a.event === 'connect' ? '+' : '-';
-  const label = a.event === 'connect' ? 'Connected' : 'Disconnected';
-  const name = a.custom_name || a.device_type || a.mac;
-  return `<div class="activity-item">
-    <div class="activity-icon ${cls}">${icon}</div>
-    <div class="activity-info">
-      <div class="activity-event ${cls}">${label}</div>
-      <div class="activity-device">${name} &middot; ${a.ip || ''}</div>
-    </div>
-    <div class="activity-time" data-ts="${a.timestamp}">${timeAgo(a.timestamp)}</div>
-  </div>`;
+function ipToSortKey(ip) {
+  if (!ip) return [999, 999, 999, 999];
+  const parts = ip.split('.').map(n => parseInt(n, 10));
+  if (parts.length !== 4 || parts.some(isNaN)) return [999, 999, 999, 999];
+  return parts;
 }
 
-function rename(el) {
-  fetch('/api/devices/' + encodeURIComponent(el.dataset.mac) + '/rename', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({name: el.value})
-  });
-  el.blur();
+function capitalize(s) {
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
 }
 
 function updateClock() {
   document.getElementById('clock').textContent =
-    new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
-}
-
-function isPhone(d) {
-  const t = (d.device_type || '').toLowerCase();
-  if (t.includes('android tv')) return false;
-  if (t.includes('iphone') || t.includes('ipad') || t.includes('phone') || t.includes('tablet')) return true;
-  if (t.includes('android') && !t.includes('tv') && !t.includes('streaming')) return true;
-  return false;
+    new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
 function updateTimes() {
-  document.querySelectorAll('.device-time[data-ts]').forEach(el => {
-    el.textContent = timeAgo(el.dataset.ts);
-  });
-  document.querySelectorAll('.activity-time[data-ts]').forEach(el => {
-    el.textContent = timeAgo(el.dataset.ts);
+  document.querySelectorAll('.ts-live[data-ts]').forEach(el => {
+    el.textContent = el.dataset.prefix ? el.dataset.prefix + timeAgo(el.dataset.ts) : timeAgo(el.dataset.ts);
   });
 }
 
-function diffUpdate(container, newDevices, rowFn) {
-  // Build map of existing rows by MAC
-  const existing = {};
-  container.querySelectorAll('[data-mac]').forEach(row => {
-    existing[row.dataset.mac] = row;
+// ---------------------------------------------------------------------
+// Row rendering
+// ---------------------------------------------------------------------
+function typeOptionsHtml(d) {
+  const effective = d.custom_type || d.resolved_type || 'unknown';
+  let html = `<option value="">Auto (${escapeHtml(effective)})</option>`;
+  metaTypes.forEach(t => {
+    const sel = d.custom_type === t ? ' selected' : '';
+    html += `<option value="${escapeHtml(t)}"${sel}>${escapeHtml(capitalize(t))}</option>`;
   });
+  return html;
+}
 
-  // Track which MACs are in the new data
-  const newMacs = new Set();
-  const focusedEl = document.activeElement;
-  const focusedMac = focusedEl && focusedEl.dataset ? focusedEl.dataset.mac : null;
+function computeKey(d) {
+  return [
+    d.mac, d.is_active ? 1 : 0, d.name, d.type, d.owner || '', d.ip || '',
+    d.os_guess || '', d.manufacturer || '', d.is_new ? 1 : 0, d.is_private_mac ? 1 : 0,
+    d.custom_name ? 1 : 0, d.custom_type ? 1 : 0, d.hostname || '',
+  ].join('|');
+}
 
-  // Create a temporary container to parse new rows
-  const tmp = document.createElement('div');
+function rowHtml(d, key) {
+  const statusCls = d.is_active ? 'online' : 'offline';
+  const statusLabel = d.is_active ? 'ONLINE' : 'OFFLINE';
+  const icon = TYPE_ICONS[d.type] || TYPE_ICONS.unknown;
+  const hasIdentity = !!d.identity;
 
-  newDevices.forEach((d, i) => {
-    newMacs.add(d._mac);
-    const oldRow = existing[d._mac];
+  const badges = [
+    `<span class="status-badge ${statusCls}"><span class="badge-dot"></span>${statusLabel}</span>`,
+  ];
+  if (d.is_new) badges.push('<span class="badge new">NEW</span>');
+  if (d.is_private_mac) badges.push('<span class="badge private">PRIVATE MAC</span>');
 
-    if (oldRow) {
-      // Row exists — only update if content changed (not time)
-      if (oldRow.dataset.key !== d._key) {
-        // Preserve detail panel if expanded
-        const detail = oldRow.nextElementSibling;
-        const hasDetail = detail && detail.classList.contains('device-detail');
-        tmp.innerHTML = d._html;
+  const youDot = d.custom_name ? '<span class="you-dot" title="Set by you"></span>' : '';
+  const nameVal = escapeHtml(d.custom_name || '');
+  const placeholder = escapeHtml(d.name || d.mac);
+
+  const osLine = d.os_guess ? `<div class="device-os">${escapeHtml(d.os_guess)}</div>` : '';
+
+  const ownerVal = escapeHtml(d.owner || '');
+
+  return `<div class="device-row ${statusCls}" data-mac="${escapeHtml(d.mac)}" data-key="${escapeHtml(key)}">
+    <div class="cell cell-status">
+      <button type="button" class="type-icon-btn" title="${hasIdentity ? 'Click for identification details' : 'No identity data yet'}" onclick="toggleIdentity('${d.mac}')">
+        ${icon}${hasIdentity ? '<span class="info-dot"></span>' : ''}
+      </button>
+      <div class="badge-stack">${badges.join('')}</div>
+    </div>
+    <div class="cell cell-name">
+      <div class="device-name-wrap">
+        <div class="name-line">
+          ${youDot}
+          <input class="editable-name" value="${nameVal}" placeholder="${placeholder}"
+                 data-mac="${escapeHtml(d.mac)}" data-field="name"
+                 onchange="updateField(this.dataset.mac,'name',this.value)"
+                 onfocus="this.select()"
+                 onkeydown="if(event.key==='Enter') this.blur()">
+        </div>
+        <div class="device-secondary">${escapeHtml(d.hostname || '')}</div>
+      </div>
+    </div>
+    <div class="cell cell-type" data-label="Type">
+      <span class="cell-label-mobile">Type</span>
+      <div>
+        <select class="type-select" data-mac="${escapeHtml(d.mac)}"
+                onchange="updateField(this.dataset.mac,'type',this.value)">
+          ${typeOptionsHtml(d)}
+        </select>
+        <div class="device-mfr">${escapeHtml(d.manufacturer || '')}</div>
+        ${osLine}
+      </div>
+    </div>
+    <div class="cell cell-owner" data-label="Owner">
+      <span class="cell-label-mobile">Owner</span>
+      <input class="editable-owner" value="${ownerVal}" placeholder="add owner"
+             data-mac="${escapeHtml(d.mac)}" data-field="owner"
+             onchange="updateField(this.dataset.mac,'owner',this.value)"
+             onfocus="this.select()"
+             onkeydown="if(event.key==='Enter') this.blur()">
+    </div>
+    <div class="cell cell-address" data-label="Address">
+      <span class="cell-label-mobile">Address</span>
+      <div class="addr-values">
+        <div class="device-ip">${escapeHtml(d.ip || '&mdash;')}</div>
+        <div class="device-mac">${escapeHtml(d.mac)}</div>
+      </div>
+    </div>
+    <div class="cell cell-seen" data-label="Activity">
+      <span class="cell-label-mobile">Activity</span>
+      <div>
+        <div class="device-time ts-live" data-ts="${d.last_seen || ''}" title="${fmtExact(d.last_seen)}">${timeAgo(d.last_seen)}</div>
+        <div class="device-time-sub ts-live" data-ts="${d.first_seen || ''}" data-prefix="first seen " title="${fmtExact(d.first_seen)}">first seen ${timeAgo(d.first_seen)}</div>
+        <div class="device-conn">${d.connection_count} connection${d.connection_count === 1 ? '' : 's'}</div>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ---------------------------------------------------------------------
+// DOM-diffing list renderer (no flashing, preserves open editors)
+// ---------------------------------------------------------------------
+function renderList(container, devices) {
+  const existing = {};
+  container.querySelectorAll(':scope > .device-row[data-mac]').forEach(r => { existing[r.dataset.mac] = r; });
+  const detailFor = {};
+  container.querySelectorAll(':scope > .device-detail[data-mac]').forEach(p => { detailFor[p.dataset.mac] = p; });
+
+  const seen = new Set();
+
+  devices.forEach(d => {
+    seen.add(d.mac);
+    const key = computeKey(d);
+    let row = existing[d.mac];
+    const focusWithin = row && row.contains(document.activeElement);
+
+    if (row) {
+      if (!focusWithin && row.dataset.key !== key) {
+        const tmp = document.createElement('div');
+        tmp.innerHTML = rowHtml(d, key);
         const newRow = tmp.firstElementChild;
-        container.replaceChild(newRow, oldRow);
-        // Re-insert detail panel after the new row
-        if (hasDetail) newRow.insertAdjacentElement('afterend', detail);
-      } else {
-        // Just update the time
-        const timeEl = oldRow.querySelector('.device-time[data-ts]');
-        if (timeEl) {
-          timeEl.dataset.ts = d._ts;
-          timeEl.textContent = timeAgo(d._ts);
-        }
+        row.replaceWith(newRow);
+        existing[d.mac] = newRow;
+        row = newRow;
       }
     } else {
-      // New row — append
-      tmp.innerHTML = d._html;
-      const newRow = tmp.firstElementChild;
-      newRow.style.animation = 'fadeIn 0.3s ease-out';
-      container.appendChild(newRow);
+      const tmp = document.createElement('div');
+      tmp.innerHTML = rowHtml(d, key);
+      row = tmp.firstElementChild;
+      row.style.animation = 'fadeIn 0.3s ease-out';
+      container.appendChild(row);
+      existing[d.mac] = row;
     }
   });
 
-  // Remove rows no longer in data (but skip detail panels)
-  container.querySelectorAll('.device-row[data-mac]').forEach(row => {
-    if (!newMacs.has(row.dataset.mac)) {
-      // Also remove associated detail panel
-      const detail = row.nextElementSibling;
-      if (detail && detail.classList.contains('device-detail')) detail.remove();
+  // Reorder to match sorted order, keeping each row's detail panel (if open) directly after it
+  devices.forEach(d => {
+    const row = existing[d.mac];
+    if (!row) return;
+    container.appendChild(row);
+    if (detailFor[d.mac]) container.appendChild(detailFor[d.mac]);
+  });
+
+  // Remove stale rows (and their detail panels)
+  Object.keys(existing).forEach(mac => {
+    if (!seen.has(mac)) {
+      const row = existing[mac];
+      if (detailFor[mac]) detailFor[mac].remove();
       row.style.opacity = '0';
       row.style.transition = 'opacity 0.2s';
       setTimeout(() => row.remove(), 200);
+      if (openPanel && openPanel.mac === mac) openPanel = null;
     }
   });
 
-  // Show empty message if needed
   const emptyEl = container.querySelector('.empty');
-  if (newDevices.length === 0 && !emptyEl) {
-    container.innerHTML = '<div class="empty">None</div>';
-  } else if (newDevices.length > 0 && emptyEl) {
+  if (devices.length === 0 && !emptyEl) {
+    const div = document.createElement('div');
+    div.className = 'empty';
+    div.textContent = 'No devices match';
+    container.appendChild(div);
+  } else if (devices.length > 0 && emptyEl) {
     emptyEl.remove();
   }
-
-  // Restore focus
-  if (focusedMac) {
-    const input = container.querySelector(`[data-mac="${focusedMac}"]`);
-    if (input) input.focus();
-  }
 }
 
-function prepDevices(devices, active) {
-  return devices.map(d => {
-    const isActive = d._active !== undefined ? d._active : active;
-    const statusCls = isActive ? 'online' : 'offline';
-    const displayName = d.custom_name || '';
-    const key = `${d.mac}|${statusCls}|${displayName}|${d.device_type}|${d.ip}`;
-    return {
-      _mac: d.mac,
-      _key: key,
-      _ts: d.last_seen,
-      _html: deviceRow(d, isActive),
-    };
-  });
-}
-
-let lastActivityIds = '';
-
-function refresh() {
-  fetch('/api/devices').then(r => r.json()).then(data => {
-    const all = [...data.active.map(d => ({...d, _active: true})),
-                 ...data.inactive.map(d => ({...d, _active: false}))];
-    const sortByLastSeen = (a, b) => new Date(b.last_seen) - new Date(a.last_seen);
-
-    const phones = all.filter(d => isPhone(d)).sort(sortByLastSeen);
-    const activeOther = data.active.filter(d => !isPhone(d)).sort(sortByLastSeen);
-    const inactive = data.inactive.filter(d => !isPhone(d)).sort(sortByLastSeen);
-
-    document.getElementById('active-count').textContent = data.active.length;
-    document.getElementById('total-count').textContent = all.length;
-    document.getElementById('phones-badge').textContent = phones.length;
-    document.getElementById('active-badge').textContent = activeOther.length;
-    document.getElementById('past-badge').textContent = inactive.length;
-
-    diffUpdate(document.getElementById('phones-list'), prepDevices(phones));
-    diffUpdate(document.getElementById('active-list'), prepDevices(activeOther, true));
-    diffUpdate(document.getElementById('past-list'), prepDevices(inactive, false));
-  });
-
-  fetch('/api/activity?limit=30').then(r => r.json()).then(data => {
-    // Only rebuild activity if the event list actually changed
-    const ids = data.map(a => a.id).join(',');
-    if (ids !== lastActivityIds) {
-      document.getElementById('activity-feed').innerHTML = data.map(activityItem).join('');
-      lastActivityIds = ids;
-    }
-    // Always update times
-    updateTimes();
-  });
-}
-
-// Identification breakdown panel
-let expandedMac = null;
-
-function toggleDetail(e) {
-  const row = e.target.closest('.device-row');
-  if (!row || row.classList.contains('device-row-header')) return;
-  // Don't toggle if clicking on the name input
-  if (e.target.classList.contains('editable-name')) return;
-  const mac = row.dataset.mac;
-  if (!mac) return;
-
-  // Close existing panel
+// ---------------------------------------------------------------------
+// Identity provenance panel + legacy fingerprint pipeline panel
+// ---------------------------------------------------------------------
+function closeOpenPanel() {
   const existing = document.querySelector('.device-detail');
-  if (existing) {
-    const wasMac = existing.dataset.mac;
-    existing.remove();
-    if (wasMac === mac) { expandedMac = null; return; }
-  }
+  if (existing) existing.remove();
+  openPanel = null;
+}
 
-  expandedMac = mac;
+function identityPanelHtml(d) {
+  if (!d.identity) {
+    return `<div class="detail-title">Identification &mdash; ${escapeHtml(d.name)}</div>
+      <div class="probe-item dim">No identity data yet for this device.</div>`;
+  }
+  const skipKeys = new Set(['is_private_mac', 'engine_version']);
+  const rows = Object.entries(d.identity)
+    .filter(([k, v]) => !skipKeys.has(k) && v && typeof v === 'object')
+    .map(([k, v]) => {
+      const pct = Math.round((v.confidence || 0) * 100);
+      return `<div class="identity-field">
+        <span class="identity-key">${escapeHtml(k.replace(/_/g, ' '))}</span>
+        <span class="identity-val">${escapeHtml(v.value || '&mdash;')}</span>
+        <span class="identity-src">${escapeHtml(v.source || '?')} &middot; ${pct}%</span>
+      </div>`;
+    }).join('');
+  return `<div class="detail-title">Identification &mdash; ${escapeHtml(d.name)}</div>
+    <div class="identity-fields">${rows || '<div class="probe-item dim">No per-field data.</div>'}</div>`;
+}
+
+function toggleIdentity(mac) {
+  const row = document.querySelector(`.device-row[data-mac="${mac}"]`);
+  if (!row) return;
+  if (openPanel && openPanel.mac === mac && openPanel.type === 'identity') { closeOpenPanel(); return; }
+  closeOpenPanel();
+  const d = deviceByMac[mac];
+  if (!d) return;
+  const panel = document.createElement('div');
+  panel.className = 'device-detail';
+  panel.dataset.mac = mac;
+  panel.innerHTML = identityPanelHtml(d) +
+    `<div style="margin-top:12px;"><button class="btn-diag" onclick="toggleFingerprint('${mac}')">Run network diagnostics &rarr;</button></div>`;
+  row.insertAdjacentElement('afterend', panel);
+  openPanel = { mac, type: 'identity' };
+}
+
+function toggleFingerprint(mac) {
+  const row = document.querySelector(`.device-row[data-mac="${mac}"]`);
+  if (!row) return;
+  if (openPanel && openPanel.mac === mac && openPanel.type === 'fingerprint') { closeOpenPanel(); return; }
+  closeOpenPanel();
   const panel = document.createElement('div');
   panel.className = 'device-detail';
   panel.dataset.mac = mac;
   panel.innerHTML = '<div class="detail-title">Loading identification data...</div>';
   row.insertAdjacentElement('afterend', panel);
+  openPanel = { mac, type: 'fingerprint' };
 
   fetch('/api/devices/' + encodeURIComponent(mac) + '/fingerprint')
     .then(r => r.json())
-    .then(data => renderDetail(panel, mac, data));
+    .then(data => renderFingerprintDetail(panel, mac, data));
 }
 
-function renderDetail(panel, mac, resp) {
+function renderFingerprintDetail(panel, mac, resp) {
   const vendor = resp.manufacturer || 'Unknown';
   const dtype = resp.device_type || 'Unknown';
 
@@ -640,8 +845,8 @@ function renderDetail(panel, mac, resp) {
       <div class="detail-pipeline">
         <div class="probe-stage matched">
           <div class="probe-stage-title"><span class="probe-check pass">&#10003;</span> MAC Vendor</div>
-          <div class="probe-item">${vendor}</div>
-          <div class="probe-result">${dtype}</div>
+          <div class="probe-item">${escapeHtml(vendor)}</div>
+          <div class="probe-result">${escapeHtml(dtype)}</div>
         </div>
         <div class="probe-stage">
           <div class="probe-stage-title"><span class="probe-check fail">&#x2014;</span> Port Scan</div>
@@ -657,83 +862,46 @@ function renderDetail(panel, mac, resp) {
 
   const d = resp.data;
   const idBy = d.identified_by;
-
-  // Port scan stage
   const openPorts = (d.port_scan && d.port_scan.open) || [];
   const checkedPorts = (d.port_scan && d.port_scan.ports_checked) || [];
   const portMatched = openPorts.length > 0;
 
-  // Deep probe stages
   const probes = [];
-
-  // TLS
   if (d.tls_cert) {
     const t = d.tls_cert;
-    probes.push({
-      name: 'TLS Cert',
-      port: t.port,
-      matched: !!t.identified_as,
-      isIdentifier: idBy === 'tls_cert',
-      detail: t.cert_text ? t.cert_text.substring(0, 120) : 'No cert data',
-      result: t.identified_as,
-    });
-  } else if (openPorts.some(p => [443,8443,4443,7443].includes(p))) {
+    probes.push({ name: 'TLS Cert', port: t.port, matched: !!t.identified_as, isIdentifier: idBy === 'tls_cert',
+      detail: t.cert_text ? t.cert_text.substring(0, 120) : 'No cert data', result: t.identified_as });
+  } else if (openPorts.some(p => [443, 8443, 4443, 7443].includes(p))) {
     probes.push({ name: 'TLS Cert', matched: false, detail: 'No cert returned', result: null });
   }
-
-  // HTTP
   if (d.http_banner) {
     const h = d.http_banner;
     const httpChecked = (h.ports_checked || []).length > 0;
     if (httpChecked || h.identified_as) {
-      probes.push({
-        name: 'HTTP Banner',
-        matched: !!h.identified_as,
-        isIdentifier: idBy === 'http_banner',
-        detail: h.detail || ('Checked ports: ' + (h.ports_checked || []).join(', ')),
-        result: h.identified_as,
-      });
+      probes.push({ name: 'HTTP Banner', matched: !!h.identified_as, isIdentifier: idBy === 'http_banner',
+        detail: h.detail || ('Checked ports: ' + (h.ports_checked || []).join(', ')), result: h.identified_as });
     }
   }
-
-  // mDNS
   if (d.mdns) {
-    probes.push({
-      name: 'mDNS',
-      matched: !!d.mdns.hostname,
-      isIdentifier: idBy === 'mdns',
-      detail: d.mdns.hostname || 'No hostname resolved',
-      result: d.mdns.identified_as,
-    });
+    probes.push({ name: 'mDNS', matched: !!d.mdns.hostname, isIdentifier: idBy === 'mdns',
+      detail: d.mdns.hostname || 'No hostname resolved', result: d.mdns.identified_as });
   }
-
-  // NetBIOS
   if (d.netbios) {
-    probes.push({
-      name: 'NetBIOS',
-      matched: !!d.netbios.name,
-      isIdentifier: idBy === 'netbios',
-      detail: d.netbios.name || 'No name found',
-      result: d.netbios.identified_as,
-    });
+    probes.push({ name: 'NetBIOS', matched: !!d.netbios.name, isIdentifier: idBy === 'netbios',
+      detail: d.netbios.name || 'No name found', result: d.netbios.identified_as });
   }
+  if (probes.length === 0) probes.push({ name: 'Deep Probes', matched: false, detail: 'No open probe ports', result: null });
 
-  // If no deep probes ran at all
-  if (probes.length === 0) {
-    probes.push({ name: 'Deep Probes', matched: false, detail: 'No open probe ports', result: null });
-  }
-
-  // Build deep probes HTML
   const probesHtml = probes.map(p => {
     const cls = (p.matched || p.isIdentifier) ? 'matched' : '';
     const icon = p.isIdentifier ? '<span class="probe-check pass">&#10003;</span>'
-               : p.matched ? '<span class="probe-check pass">&#8226;</span>'
-               : '<span class="probe-check fail">&#x2717;</span>';
+      : p.matched ? '<span class="probe-check pass">&#8226;</span>'
+        : '<span class="probe-check fail">&#x2717;</span>';
     const portStr = p.port ? ` :${p.port}` : '';
-    const resultHtml = p.result ? `<div class="probe-result">${p.result}</div>` : '';
+    const resultHtml = p.result ? `<div class="probe-result">${escapeHtml(p.result)}</div>` : '';
     return `<div class="probe-stage ${cls}">
       <div class="probe-stage-title">${icon} ${p.name}${portStr}</div>
-      <div class="probe-item ${p.matched ? '' : 'dim'}">${p.detail}</div>
+      <div class="probe-item ${p.matched ? '' : 'dim'}">${escapeHtml(p.detail)}</div>
       ${resultHtml}
     </div>`;
   }).join('');
@@ -748,8 +916,8 @@ function renderDetail(panel, mac, resp) {
     <div class="detail-pipeline">
       <div class="probe-stage matched">
         <div class="probe-stage-title"><span class="probe-check pass">&#10003;</span> MAC Vendor</div>
-        <div class="probe-item">${vendor}</div>
-        <div class="probe-result">${dtype}</div>
+        <div class="probe-item">${escapeHtml(vendor)}</div>
+        <div class="probe-result">${escapeHtml(dtype)}</div>
       </div>
       <div class="probe-stage ${portMatched ? 'matched' : ''}">
         <div class="probe-stage-title">${portMatched ? '<span class="probe-check pass">&#8226;</span>' : '<span class="probe-check fail">&#x2717;</span>'} Port Scan</div>
@@ -766,19 +934,226 @@ function reprobe(mac) {
   fetch('/api/devices/' + encodeURIComponent(mac) + '/reprobe', { method: 'POST' });
   const panel = document.querySelector(`.device-detail[data-mac="${mac}"]`);
   if (panel) {
-    panel.querySelector('.detail-title').innerHTML = 'Re-scanning device... results will appear shortly.';
+    const title = panel.querySelector('.detail-title');
+    if (title) title.innerHTML = 'Re-scanning device... results will appear shortly.';
   }
 }
 
-// Attach click handlers to device list containers (event delegation)
-document.addEventListener('click', toggleDetail);
+// ---------------------------------------------------------------------
+// Editing
+// ---------------------------------------------------------------------
+function updateField(mac, field, value) {
+  const body = {};
+  body[field] = value;
+  fetch('/api/devices/' + encodeURIComponent(mac) + '/update', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then(r => r.json()).then(resp => {
+    if (!resp.ok) console.error('update failed for', mac, field, resp);
+    loadDevices();
+  }).catch(err => console.error('update error', err));
+}
+
+// ---------------------------------------------------------------------
+// Filters, search, sort controls
+// ---------------------------------------------------------------------
+function renderChips(counts) {
+  const row = document.getElementById('chip-row');
+  row.innerHTML = FILTER_OPTIONS.map(opt => {
+    const active = opt.key === currentFilter ? ' active' : '';
+    return `<div class="chip${active}" data-filter="${opt.key}" onclick="setFilter('${opt.key}')">
+      ${opt.label} <span class="chip-count">${counts[opt.key]}</span>
+    </div>`;
+  }).join('');
+}
+
+function renderSortButtons() {
+  const row = document.getElementById('sort-row');
+  const buttons = SORT_OPTIONS.map(opt => {
+    const active = opt.key === sortState.key;
+    const arrow = active ? (sortState.dir === 'asc' ? ' &#9650;' : ' &#9660;') : '';
+    return `<button type="button" class="sort-btn${active ? ' active' : ''}" onclick="setSort('${opt.key}')">${opt.label}${arrow}</button>`;
+  }).join('');
+  row.innerHTML = '<span class="sort-label">Sort</span>' + buttons;
+}
+
+function setFilter(key) {
+  currentFilter = key;
+  render();
+}
+
+function setSort(key) {
+  if (sortState.key === key) {
+    sortState.dir = sortState.dir === 'asc' ? 'desc' : 'asc';
+  } else {
+    const opt = SORT_OPTIONS.find(o => o.key === key);
+    sortState = { key, dir: opt ? opt.defaultDir : 'asc' };
+  }
+  render();
+}
+
+document.getElementById('search-box').addEventListener('input', (e) => {
+  searchQuery = e.target.value.trim().toLowerCase();
+  render();
+});
+
+function matchesSearch(d) {
+  if (!searchQuery) return true;
+  const hay = [d.name, d.hostname, d.ip, d.mac, d.manufacturer].join(' ').toLowerCase();
+  return hay.includes(searchQuery);
+}
+
+function matchesFilter(d) {
+  switch (currentFilter) {
+    case 'online': return !!d.is_active;
+    case 'new': return !!d.is_new;
+    case 'needs': return !d.custom_name;
+    case 'private': return !!d.is_private_mac;
+    default: return true;
+  }
+}
+
+function compareDevices(a, b) {
+  let cmp = 0;
+  switch (sortState.key) {
+    case 'name':
+      cmp = (a.name || '').localeCompare(b.name || '');
+      break;
+    case 'first_seen':
+      cmp = new Date(a.first_seen || 0) - new Date(b.first_seen || 0);
+      break;
+    case 'ip': {
+      const ka = ipToSortKey(a.ip), kb = ipToSortKey(b.ip);
+      for (let i = 0; i < 4; i++) { if (ka[i] !== kb[i]) { cmp = ka[i] - kb[i]; break; } }
+      break;
+    }
+    case 'connections':
+      cmp = (a.connection_count || 0) - (b.connection_count || 0);
+      break;
+    case 'last_seen':
+    default:
+      cmp = new Date(a.last_seen || 0) - new Date(b.last_seen || 0);
+      break;
+  }
+  if (cmp === 0) cmp = a.mac.localeCompare(b.mac);
+  return sortState.dir === 'asc' ? cmp : -cmp;
+}
+
+// ---------------------------------------------------------------------
+// Activity feed
+// ---------------------------------------------------------------------
+function activityName(a) {
+  return a.custom_name || a.display_name || a.hostname || a.mac;
+}
+
+function activityItemHtml(a) {
+  const isConnect = a.event === 'connect';
+  const cls = isConnect ? 'connect' : 'disconnect';
+  const icon = isConnect ? '&#9650;' : '&#9661;';
+  const label = isConnect ? 'JOINED' : 'LEFT';
+  const name = escapeHtml(activityName(a));
+  return `<div class="activity-item">
+    <div class="activity-icon ${cls}">${icon}<br>${label}</div>
+    <div class="activity-info">
+      <div class="activity-device">${name} &middot; ${escapeHtml(a.ip || '')}</div>
+      <div class="activity-time ts-live" data-ts="${a.timestamp}" title="${fmtExact(a.timestamp)}">${timeAgo(a.timestamp)}</div>
+    </div>
+  </div>`;
+}
+
+function renderActivity(items) {
+  let html = '';
+  let lastDay = null;
+  items.forEach(a => {
+    const day = dayLabel(a.timestamp);
+    if (day !== lastDay) {
+      html += `<div class="activity-day-header">${day}</div>`;
+      lastDay = day;
+    }
+    html += activityItemHtml(a);
+  });
+  document.getElementById('activity-feed').innerHTML = html || '<div class="empty">No activity yet</div>';
+}
+
+// ---------------------------------------------------------------------
+// Main render pipeline
+// ---------------------------------------------------------------------
+function render() {
+  const counts = {
+    all: allDevices.length,
+    online: allDevices.filter(d => d.is_active).length,
+    new: allDevices.filter(d => d.is_new).length,
+    needs: allDevices.filter(d => !d.custom_name).length,
+    private: allDevices.filter(d => d.is_private_mac).length,
+  };
+
+  document.getElementById('stat-online').textContent = counts.online;
+  document.getElementById('stat-total').textContent = counts.all;
+  document.getElementById('stat-new').textContent = counts.new;
+  document.getElementById('stat-needs').textContent = counts.needs;
+
+  renderChips(counts);
+  renderSortButtons();
+
+  const filtered = allDevices.filter(d => matchesFilter(d) && matchesSearch(d)).sort(compareDevices);
+  document.getElementById('main-badge').textContent = filtered.length;
+  renderList(document.getElementById('device-list-main'), filtered);
+
+  const phones = allDevices
+    .filter(d => d.is_active && PERSONAL_TYPES.includes(d.type))
+    .sort((a, b) => {
+      const cmp = new Date(b.last_seen || 0) - new Date(a.last_seen || 0);
+      return cmp !== 0 ? cmp : a.mac.localeCompare(b.mac);
+    });
+  document.getElementById('phones-badge').textContent = phones.length;
+  const phonesCard = document.getElementById('phones-card');
+  phonesCard.classList.toggle('empty-hide', phones.length === 0);
+  renderList(document.getElementById('phones-list'), phones);
+
+  updateTimes();
+}
+
+function loadDevices() {
+  return fetch('/api/devices').then(r => r.json()).then(data => {
+    allDevices = data.devices;
+    deviceByMac = {};
+    allDevices.forEach(d => { deviceByMac[d.mac] = d; });
+    render();
+  });
+}
+
+function loadActivity() {
+  return fetch('/api/activity?limit=40').then(r => r.json()).then(data => {
+    const ids = data.map(a => a.id).join(',');
+    if (ids !== lastActivityIds) {
+      renderActivity(data);
+      lastActivityIds = ids;
+    } else {
+      updateTimes();
+    }
+  });
+}
+
+function loadMeta() {
+  return fetch('/api/meta').then(r => r.json()).then(data => {
+    if (data.types && data.types.length) metaTypes = data.types;
+  }).catch(() => {});
+}
+
+function refresh() {
+  loadDevices();
+  loadActivity();
+}
 
 updateClock();
 setInterval(updateClock, 1000);
-// Update times every second without fetching
 setInterval(updateTimes, 1000);
-refresh();
-setInterval(refresh, 5000);
+
+loadMeta().then(() => {
+  refresh();
+  setInterval(refresh, 5000);
+});
 </script>
 </body>
 </html>
