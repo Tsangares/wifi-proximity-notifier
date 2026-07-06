@@ -5,3 +5,5 @@ __pycache__/
 *.log
 wifi-notifier.service
 CLAUDE.md
+docs/dashboard-live.png
+journals/images/dashboard-live*
