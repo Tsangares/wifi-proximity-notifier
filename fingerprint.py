@@ -457,6 +457,10 @@ def _worker():
                 # Mark as probed even if we didn't find anything, so we don't retry
                 device_db.update_fingerprint(mac, None, "", fp_json)
 
+            # Fold the fresh probe evidence into the canonical identity
+            import resolver
+            resolver.resolve_mac(mac)
+
         except Exception as e:
             log.error("Deep probe error for %s: %s", mac, e, exc_info=True)
 

@@ -1,12 +1,26 @@
 import sqlite3
 import os
+import json
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 
 DB_DIR = os.path.expanduser("~/.local/share/wifi-notifier")
-DB_PATH = os.path.join(DB_DIR, "devices.db")
+# WIFI_NOTIFIER_DB env var overrides the DB location (used by tests / mock mode)
+DB_PATH = os.environ.get("WIFI_NOTIFIER_DB") or os.path.join(DB_DIR, "devices.db")
 
 _local = threading.local()
+
+
+def use_mock_db():
+    """Switch to a separate mock database file. MUST be called before any
+    DB access. Mock mode wipes and re-seeds its DB, so it must never point
+    at the real devices.db (that would destroy accumulated device history)."""
+    global DB_PATH
+    DB_PATH = os.path.join(DB_DIR, "mock.db")
+    # Drop any existing per-thread connection so it reopens on the new path
+    if getattr(_local, "conn", None) is not None:
+        _local.conn.close()
+        _local.conn = None
 
 
 def _get_conn():
@@ -53,6 +67,22 @@ def _init_tables(conn):
     if "fingerprint_data" not in cols:
         conn.execute("ALTER TABLE devices ADD COLUMN fingerprint_data TEXT DEFAULT ''")
         conn.commit()
+    # Identity-engine columns (additive migration — existing data untouched).
+    # Resolved fields are written by identity.resolve() via set_identity();
+    # custom_* and owner are user-set and never touched by automatic code.
+    for col, decl in [
+        ("display_name", "TEXT DEFAULT ''"),      # resolved best name (auto)
+        ("resolved_type", "TEXT DEFAULT 'unknown'"),  # canonical device type (auto)
+        ("os_guess", "TEXT DEFAULT ''"),          # resolved OS (auto)
+        ("identity_meta", "TEXT DEFAULT ''"),     # JSON: per-field confidence + provenance
+        ("identity_version", "INTEGER DEFAULT 0"),  # engine version that last resolved
+        ("is_private_mac", "INTEGER DEFAULT 0"),  # locally-administered (randomized) MAC
+        ("custom_type", "TEXT DEFAULT ''"),       # user override — sacred
+        ("owner", "TEXT DEFAULT ''"),             # user-set owner — sacred
+    ]:
+        if col not in cols:
+            conn.execute(f"ALTER TABLE devices ADD COLUMN {col} {decl}")
+            conn.commit()
     # Clean up bad data from nmap parsing bug (hostname="1", ip="0.0.0.x")
     conn.execute("UPDATE devices SET hostname = '' WHERE hostname = '1'")
     conn.execute("UPDATE devices SET ip = '' WHERE ip LIKE '0.0.0.%'")
@@ -138,7 +168,8 @@ def log_event(mac, event, ip=""):
 def get_activity_log(limit=100):
     conn = _get_conn()
     rows = conn.execute(
-        "SELECT a.*, d.custom_name, d.manufacturer, d.device_type "
+        "SELECT a.*, d.custom_name, d.display_name, d.hostname, d.manufacturer, "
+        "d.device_type, d.resolved_type, d.custom_type, d.is_private_mac "
         "FROM activity_log a LEFT JOIN devices d ON a.mac = d.mac "
         "ORDER BY a.timestamp DESC LIMIT ?",
         (limit,),
@@ -174,3 +205,84 @@ def clear_last_probed(mac):
     conn = _get_conn()
     conn.execute("UPDATE devices SET last_probed = '' WHERE mac = ?", (mac,))
     conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# Identity engine persistence
+# ---------------------------------------------------------------------------
+
+def set_identity(mac, display_name, resolved_type, os_guess, manufacturer,
+                 identity_meta, is_private_mac, engine_version):
+    """Persist resolved identity fields. NEVER touches custom_name,
+    custom_type, or owner — those are user-set and sacred."""
+    conn = _get_conn()
+    conn.execute(
+        "UPDATE devices SET display_name = ?, resolved_type = ?, os_guess = ?, "
+        "manufacturer = ?, identity_meta = ?, is_private_mac = ?, identity_version = ? "
+        "WHERE mac = ?",
+        (display_name, resolved_type, os_guess, manufacturer, identity_meta,
+         1 if is_private_mac else 0, engine_version, mac),
+    )
+    conn.commit()
+
+
+def update_device_user_fields(mac, name=None, dtype=None, owner=None):
+    """Set user-controlled fields (pass None to leave a field unchanged;
+    pass '' to explicitly clear an override)."""
+    conn = _get_conn()
+    sets, args = [], []
+    if name is not None:
+        sets.append("custom_name = ?")
+        args.append(name)
+    if dtype is not None:
+        sets.append("custom_type = ?")
+        args.append(dtype)
+    if owner is not None:
+        sets.append("owner = ?")
+        args.append(owner)
+    if not sets:
+        return
+    args.append(mac)
+    conn.execute(f"UPDATE devices SET {', '.join(sets)} WHERE mac = ?", args)
+    conn.commit()
+
+
+def get_devices_view(new_window_hours=24):
+    """All devices enriched for the dashboard:
+    - name: custom_name > display_name > hostname > mac (user override wins)
+    - type: custom_type > resolved_type
+    - identity: parsed identity_meta JSON (confidence + provenance) or None
+    - connection_count: number of 'connect' events in the activity log
+    - is_new: first_seen within new_window_hours
+    """
+    conn = _get_conn()
+    counts = {r[0]: r[1] for r in conn.execute(
+        "SELECT mac, COUNT(*) FROM activity_log WHERE event = 'connect' GROUP BY mac"
+    ).fetchall()}
+    cutoff = (datetime.now() - timedelta(hours=new_window_hours)).isoformat()
+    out = []
+    for r in conn.execute(
+        "SELECT * FROM devices ORDER BY is_active DESC, last_seen DESC"
+    ).fetchall():
+        d = dict(r)
+        d["name"] = (d.get("custom_name") or d.get("display_name")
+                     or d.get("hostname") or d["mac"])
+        d["type"] = d.get("custom_type") or d.get("resolved_type") or "unknown"
+        try:
+            d["identity"] = json.loads(d["identity_meta"]) if d.get("identity_meta") else None
+        except (json.JSONDecodeError, TypeError):
+            d["identity"] = None
+        d["connection_count"] = counts.get(d["mac"], 0)
+        d["is_new"] = bool(d.get("first_seen") and d["first_seen"] >= cutoff)
+        out.append(d)
+    return out
+
+
+def devices_needing_identity(engine_version):
+    """Devices whose identity was resolved by an older engine version
+    (or never resolved). Used for startup backfill."""
+    conn = _get_conn()
+    return [dict(r) for r in conn.execute(
+        "SELECT * FROM devices WHERE identity_version != ? OR identity_meta = ''",
+        (engine_version,),
+    ).fetchall()]

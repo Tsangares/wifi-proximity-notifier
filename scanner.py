@@ -14,6 +14,7 @@ import manufacturer as mfr
 import notifier
 import net
 import fingerprint
+import resolver
 
 log = logging.getLogger(__name__)
 
@@ -103,10 +104,16 @@ def _process_scan_results(found_devices, hostnames=None, alive_macs=None, reacha
             if device is None:
                 device_db.upsert_device(mac, ip, vendor, dtype, hostname)
                 device_db.log_event(mac, "connect", ip)
+                # Resolve canonical identity from whatever evidence we have so far
+                res = resolver.resolve_mac(mac)
+                notif_name = res["display_name"]["value"] if res else ""
+                notif_type = res["device_type"]["value"] if res else dtype
+                notif_mfr = res["manufacturer"]["value"] if res else vendor
                 _notified_new[mac] = now
-                log.info("NEW DEVICE: %s (%s) [%s] %s - %s", mac, ip, hostname, vendor, dtype)
+                log.info("NEW DEVICE: %s (%s) [%s] %s - %s", mac, ip, hostname, notif_mfr, notif_type)
                 if not silent:
-                    notifier.notify_new_device(mac, ip, vendor, dtype)
+                    notifier.notify_new_device(mac, ip, notif_mfr, notif_type,
+                                               custom_name=notif_name)
                 fingerprint.queue_probe(mac, ip)
 
             elif not device["is_active"]:
@@ -118,6 +125,9 @@ def _process_scan_results(found_devices, hostnames=None, alive_macs=None, reacha
 
                 device_db.upsert_device(mac, ip, vendor, dtype, hostname)
                 device_db.log_event(mac, "connect", ip)
+                # Re-resolve identity if we just learned a (new) hostname
+                if hostname and hostname != device.get("hostname", ""):
+                    resolver.resolve_mac(mac)
 
                 # Re-probe if device was never fingerprinted
                 if not device.get("last_probed"):
@@ -141,16 +151,24 @@ def _process_scan_results(found_devices, hostnames=None, alive_macs=None, reacha
                     else:
                         _notified_new[mac] = now
                         if not silent:
+                            name = (device.get("custom_name")
+                                    or device.get("display_name") or "")
+                            rtype = (device.get("custom_type")
+                                     or device.get("resolved_type")
+                                     or device.get("device_type", dtype))
                             notifier.notify_new_device(mac, ip,
                                                        device.get("manufacturer", vendor),
-                                                       device.get("device_type", dtype),
+                                                       rtype,
                                                        is_returning=True,
-                                                       custom_name=device.get("custom_name", ""))
+                                                       custom_name=name)
             else:
                 device_db.upsert_device(mac, ip,
                                         device.get("manufacturer", "Unknown"),
                                         device.get("device_type", "Unknown"),
                                         hostname)
+                # Re-resolve identity if we just learned a (new) hostname
+                if hostname and hostname != device.get("hostname", ""):
+                    resolver.resolve_mac(mac)
 
         # Mark seen devices as not-disconnecting
         for mac in seen_macs:
@@ -248,8 +266,9 @@ def _probe_disconnect(mac, ip, device):
             notifier.notify_device_left(
                 mac, ip,
                 device.get("manufacturer", "Unknown"),
-                device.get("device_type", "Unknown"),
-                device.get("custom_name", ""),
+                (device.get("custom_type") or device.get("resolved_type")
+                 or device.get("device_type", "Unknown")),
+                device.get("custom_name") or device.get("display_name", ""),
             )
     except Exception as e:
         log.error("Disconnect probe error for %s: %s", mac, e)
@@ -300,7 +319,9 @@ def _update_from_mdns_services(mdns_results):
     if not mdns_results:
         return
     for device in device_db.get_active_devices():
-        if device["device_type"] not in _WEAK_DEVICE_TYPES:
+        weak = (device["device_type"] in _WEAK_DEVICE_TYPES
+                or device.get("resolved_type", "unknown") in ("", "unknown"))
+        if not weak:
             continue
         ip = device.get("ip", "")
         if not ip or ip not in mdns_results:
@@ -316,6 +337,7 @@ def _update_from_mdns_services(mdns_results):
                 device["mac"], dtype, name,
                 json.dumps({"mdns_services": svc_list}, default=str),
             )
+            resolver.resolve_mac(device["mac"])  # fold new evidence into identity
 
 
 def _passive_monitor_loop(monitor):
