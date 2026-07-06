@@ -4,6 +4,8 @@ import subprocess
 import re
 import socket
 import logging
+import threading
+import time
 
 log = logging.getLogger(__name__)
 
@@ -80,6 +82,109 @@ def parse_ip_neigh():
     except Exception as e:
         log.warning("ip neigh failed: %s", e)
     return all_devices, reachable, stale
+
+
+def parse_neigh_line(line):
+    """Parse a single line of `ip neigh` / `ip monitor neigh` output.
+
+    Same line format as `ip neigh show`, e.g.:
+        10.0.0.23 dev wlan0 lladdr c2:85:82:c2:44:e2 REACHABLE
+        10.0.0.77 dev wlan0 FAILED
+    `ip monitor neigh` additionally prefixes removed entries with "Deleted ":
+        Deleted 10.0.0.23 dev wlan0 lladdr c2:85:82:c2:44:e2 STALE
+
+    Returns a dict {"mac", "ip", "state", "deleted"} or None if the line has
+    no usable MAC (FAILED/INCOMPLETE entries have none), is IPv6 link-local,
+    or is otherwise blank/unparsable.
+    """
+    line = line.strip()
+    if not line:
+        return None
+    deleted = line.startswith("Deleted ")
+    if deleted:
+        line = line[len("Deleted "):]
+    parts = line.split()
+    if not parts:
+        return None
+    ip = parts[0]
+    if ip.startswith("fe80:") or ip.startswith("ff"):
+        return None
+    if "lladdr" not in parts:
+        return None
+    idx = parts.index("lladdr")
+    if idx + 1 >= len(parts):
+        return None
+    mac = parts[idx + 1].lower()
+    state = parts[-1] if len(parts) > idx + 2 else ""
+    if state in ("FAILED", "INCOMPLETE"):
+        return None
+    return {"mac": mac, "ip": ip, "state": state, "deleted": deleted}
+
+
+class NeighMonitor:
+    """Wraps a persistent `ip monitor neigh` subprocess.
+
+    `ip monitor neigh` streams kernel ARP table transitions live (no polling
+    needed), giving near-instant connect signals. It's a plain line stream —
+    no initial dump — so it complements rather than replaces the periodic
+    poll (which still covers the startup snapshot and reconciles anything
+    the monitor misses, e.g. a dropped netlink message).
+
+    Call `.lines()` from a single consumer thread to get an infinite
+    generator of raw stdout lines; the subprocess is restarted automatically
+    (after `restart_delay` seconds) if it exits or errors. Call `.stop()` to
+    shut it down.
+    """
+
+    def __init__(self, restart_delay=2):
+        self.restart_delay = restart_delay
+        self._proc = None
+        self._stopped = threading.Event()
+
+    def stop(self):
+        self._stopped.set()
+        proc = self._proc
+        if proc and proc.poll() is None:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+
+    def lines(self):
+        """Yield raw lines from `ip monitor neigh`, restarting on crash.
+        Runs until stop() is called."""
+        while not self._stopped.is_set():
+            try:
+                self._proc = subprocess.Popen(
+                    ["ip", "monitor", "neigh"],
+                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                    text=True, bufsize=1,
+                )
+                for line in self._proc.stdout:
+                    if self._stopped.is_set():
+                        break
+                    yield line
+                if self._stopped.is_set():
+                    break
+                ret = self._proc.poll()
+                log.warning("ip monitor neigh exited unexpectedly (code %s); restarting in %ds",
+                            ret, self.restart_delay)
+            except FileNotFoundError:
+                log.error("`ip` binary not found; passive neigh monitor disabled")
+                return
+            except Exception as e:
+                log.warning("ip monitor neigh error: %s; restarting in %ds", e, self.restart_delay)
+            finally:
+                proc = self._proc
+                if proc and proc.poll() is None:
+                    try:
+                        proc.terminate()
+                        proc.wait(timeout=2)
+                    except Exception:
+                        pass
+            if self._stopped.is_set():
+                break
+            time.sleep(self.restart_delay)
 
 
 def parse_arp_scan():

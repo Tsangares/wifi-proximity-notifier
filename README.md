@@ -10,15 +10,15 @@ A daemon that watches your local network and tells you when devices show up or l
 ## How it works
 
 ```
-  arp-scan (every 3s)  ──┐
-                         ├──> Process ──> Notify + Dashboard
-  ip neigh (ARP table) ──┘       │
-                                 ├── New device? → notification + chirp
-  nmap (every 30s) ──────────────┤── Device gone? → arping probes → confirm → notify
-                                 └── Update dashboard + SQLite DB
+  ip monitor neigh (live) ───────┐
+  arp-scan (every 10s)  ─────────┼──> Process ──> Notify + Dashboard
+  ip neigh (ARP table) ──────────┘       │
+                                         ├── New device? → notification + chirp
+  nmap (every 30s) ──────────────────────┤── Device gone? → arping probes → confirm → notify
+                                         └── Update dashboard + SQLite DB
 ```
 
-Every 3 seconds, `arp-scan` and the kernel ARP table are checked for new MACs. When a device drops out of the ARP table, 3 rapid `arping` probes confirm it's actually gone before sending a disconnect notification. This avoids false alarms for sleeping phones — iPhones and iPads ignore ICMP pings but still respond to ARP.
+Connect detection is mostly passive: a persistent `ip monitor neigh` subprocess streams kernel ARP table transitions live, so a new or returning device is picked up in near real time instead of waiting for a poll. A 10-second poll (`arp-scan` + the kernel ARP table) still runs as a fallback/reconcile pass — it covers the initial snapshot on startup and catches anything the passive stream misses (dropped netlink message, monitor process restart). When a device drops out of the ARP table, rapid `arping` probes confirm it's actually gone before sending a disconnect notification. This avoids false alarms for sleeping phones — iPhones and iPads ignore ICMP pings but still respond to ARP.
 
 Device identification comes from the MAC vendor database, mDNS/DNS hostname lookups, and randomized-MAC detection (the locally-administered bit).
 
@@ -107,7 +107,7 @@ The UI uses text labels (ONLINE/OFFLINE), solid vs dashed borders, and brightnes
 Edit the timing constants at the top of `scanner.py`:
 
 ```python
-FAST_SCAN_INTERVAL = 3       # seconds between ARP sweeps
+FAST_SCAN_INTERVAL = 10      # seconds between fallback/reconcile ARP sweeps (connect detection is mostly passive now)
 DETAIL_SCAN_INTERVAL = 30    # seconds between nmap hostname sweeps
 DISCONNECT_PROBE_COUNT = 2   # failed arping probes before declaring gone
 DISCONNECT_PROBE_SLEEP = 0.1 # seconds between probes
@@ -146,6 +146,19 @@ mock_data.py        Fake device data for --mock mode.
 templates/          Dashboard HTML.
 static/             Connect/disconnect sound files.
 ```
+
+### bandwidth_monitor.py — separate tool, not part of the daemon
+
+`bandwidth_monitor.py` is a standalone script, unrelated to `app.py`/`scanner.py`. It's meant to run on a Raspberry Pi named `nes`, not on this laptop: it ARP-spoofs the gateway to route LAN traffic through the Pi and exposes per-device bandwidth stats over HTTP on port 5556. It isn't started by `app.py`, isn't installed by `install.sh`, and doesn't share any code with the notifier. See the header comment in the file for usage.
+
+## Tests
+
+```bash
+source venv/bin/activate
+python3 -m unittest discover -s tests -v
+```
+
+Covers the `ip monitor neigh` line parser and subprocess-restart behavior (`tests/test_neigh_monitor.py`, offline — no root or live network needed) and an end-to-end check of the passive-connect path through `_process_scan_results` against a throwaway SQLite DB (`tests/test_passive_connect_integration.py`).
 
 ## Data
 

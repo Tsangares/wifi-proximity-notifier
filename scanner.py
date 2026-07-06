@@ -18,7 +18,14 @@ import fingerprint
 log = logging.getLogger(__name__)
 
 # Timing config
-FAST_SCAN_INTERVAL = 3       # seconds between fast ARP sweeps
+# Connect detection is now primarily passive (see NeighMonitor / _passive_monitor_loop
+# below): `ip monitor neigh` streams kernel ARP transitions live, so new/REACHABLE
+# devices are picked up in near real time instead of waiting for the next poll.
+# FAST_SCAN_INTERVAL is now a fallback/reconcile rate — it covers the startup
+# snapshot, catches anything the passive monitor misses (e.g. a dropped netlink
+# message or a restart gap), and still drives disconnect-probing (see
+# _queue_disconnect_checks / _check_stale_devices). Was 3s pre-passive-detection.
+FAST_SCAN_INTERVAL = 10      # seconds between fallback/reconcile ARP sweeps
 DETAIL_SCAN_INTERVAL = 30    # seconds between nmap sweeps (hostnames)
 DISCONNECT_PROBE_COUNT = 5   # number of failed arping probes before declaring gone
 DISCONNECT_PROBE_SLEEP = 0.3 # seconds between arping probes
@@ -40,6 +47,10 @@ _notified_new = {}    # mac -> datetime of last "new device" notification
 _flap_history = {}    # mac -> list of recent disconnect datetimes
 _lock = threading.Lock()
 _running = False
+
+# Passive connect detection (ip monitor neigh)
+_neigh_monitor = None       # net.NeighMonitor instance, owned by scan_loop()
+_startup_done = threading.Event()  # gates passive notifications until the silent first scan finishes
 
 
 def _process_scan_results(found_devices, hostnames=None, alive_macs=None, reachable_macs=None, silent=False):
@@ -307,10 +318,51 @@ def _update_from_mdns_services(mdns_results):
             )
 
 
+def _passive_monitor_loop(monitor):
+    """Consume `ip monitor neigh` events and feed connect signals into the
+    same processing path the poller uses (_process_scan_results), so new or
+    reconnecting devices are notified as soon as the kernel sees them instead
+    of waiting for the next fallback poll.
+
+    Only REACHABLE lines are treated as "alive" (mirrors the poller's
+    reachable_macs semantics — confirmed alive, not just lingering STALE).
+    Deletions are intentionally ignored here: disconnect still goes through
+    the arping-confirmation path (_queue_disconnect_checks / _probe_disconnect)
+    because sleeping devices produce spurious absence that would otherwise
+    cause false disconnects.
+    """
+    _startup_done.wait()  # don't fire notifications during the silent startup scan
+    log.info("Passive neigh monitor loop starting")
+    try:
+        for line in monitor.lines():
+            if not _running:
+                break
+            try:
+                parsed = net.parse_neigh_line(line)
+            except Exception as e:
+                log.debug("Failed to parse neigh monitor line %r: %s", line, e)
+                continue
+            if not parsed or parsed["deleted"]:
+                continue
+
+            mac, ip, state = parsed["mac"], parsed["ip"], parsed["state"]
+            alive = {mac} if state == "REACHABLE" else set()
+            try:
+                _process_scan_results(
+                    {(mac, ip)}, hostnames={}, alive_macs=alive, reachable_macs=alive,
+                )
+            except Exception as e:
+                log.error("Passive monitor processing error for %s (%s): %s", mac, ip, e)
+    except Exception as e:
+        log.error("Passive neigh monitor loop crashed: %s", e, exc_info=True)
+    log.info("Passive neigh monitor loop exiting")
+
+
 def scan_loop():
     """Main scanning loop."""
-    global _running
+    global _running, _neigh_monitor
     _running = True
+    _startup_done.clear()
     subnet = net.detect_subnet()
     log.info("Starting scanner on subnet %s", subnet)
     log.info("Timings: fast=%ds, detail=%ds, probe_count=%d, probe_sleep=%.1fs, stale_timeout=%ds, grace=%ds",
@@ -375,6 +427,15 @@ def scan_loop():
     detail_thread = threading.Thread(target=detail_loop, daemon=True)
     detail_thread.start()
 
+    # Passive connect detection: `ip monitor neigh` streams kernel ARP
+    # transitions live. Feeds _process_scan_results directly, in parallel
+    # with the fallback poll below.
+    _neigh_monitor = net.NeighMonitor(restart_delay=2)
+    passive_thread = threading.Thread(
+        target=_passive_monitor_loop, args=(_neigh_monitor,), daemon=True,
+    )
+    passive_thread.start()
+
     fingerprint.start()
 
     while _running:
@@ -416,6 +477,7 @@ def scan_loop():
                 _update_from_mdns_services(mdns_services)
 
             first_scan = False
+            _startup_done.set()  # let the passive monitor start firing notifications
 
         except Exception as e:
             log.error("Scan loop error: %s", e, exc_info=True)
@@ -426,4 +488,6 @@ def scan_loop():
 def stop():
     global _running
     _running = False
+    if _neigh_monitor is not None:
+        _neigh_monitor.stop()
     fingerprint.stop()
