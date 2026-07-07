@@ -57,6 +57,23 @@
     margin-left: auto; color: #55556a; font-size: 0.8em;
     font-variant-numeric: tabular-nums; white-space: nowrap;
   }
+  .sound-toggle {
+    flex-shrink: 0;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: #8b8b9e; font-size: 0.75em; font-weight: 600;
+    padding: 8px 14px; border-radius: 20px; cursor: pointer;
+    white-space: nowrap; transition: all 0.15s;
+    display: inline-flex; align-items: center; gap: 6px;
+    min-height: 36px;
+  }
+  .sound-toggle:hover { background: rgba(255, 255, 255, 0.08); color: #cfcfe0; }
+  .sound-toggle.on {
+    border-style: solid;
+    border-color: rgba(0, 240, 255, 0.45);
+    color: #cfefff;
+  }
+  .sound-toggle.off { border-style: dashed; }
 
   .card {
     background: rgba(255, 255, 255, 0.04);
@@ -423,18 +440,23 @@
 
   @media (max-width: 700px) {
     .container { padding: 14px 10px 60px; }
-    .device-row-header { display: none; }
+    /* Grid/flex items default to min-width:auto (their min-content), which lets a
+       wide card force the whole page wider than the phone screen. */
+    .layout-grid > *, .controls > *, .chip-row { min-width: 0; }
     .device-row {
       display: flex; flex-direction: column; align-items: stretch; gap: 8px;
       padding: 14px; border-radius: 12px;
     }
+    /* After .device-row so it wins at equal specificity — the header has both classes. */
+    .device-row-header { display: none; }
     .cell-status { flex-direction: row; align-items: center; justify-content: space-between; }
     .cell[data-label] { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
     .cell-label-mobile {
       display: inline-block; font-size: 0.65em; text-transform: uppercase;
       letter-spacing: 1px; color: #44445a; font-weight: 700; flex-shrink: 0;
     }
-    .type-icon-btn, .btn-diag, .chip, .sort-btn { min-height: 40px; }
+    .type-icon-btn, .btn-diag, .chip, .sort-btn, .sound-toggle { min-height: 40px; }
+    .header { flex-wrap: wrap; }
     .editable-name, .editable-owner, .type-select, .search-input { min-height: 40px; }
     .device-name-wrap { width: 100%; }
     .cell-address { flex-direction: column; align-items: flex-start !important; }
@@ -451,6 +473,10 @@
     <div class="header-icon">&#x1f4e1;</div>
     <h1>WiFi Monitor</h1>
     <div class="header-time" id="clock"></div>
+    <button class="sound-toggle" id="sound-toggle" onclick="toggleSound()"
+            title="Play a chirp when devices join or leave" aria-pressed="true">
+      &#x1f514; SOUND ON
+    </button>
   </div>
 
   <div class="stats-row">
@@ -1141,9 +1167,46 @@ function loadMeta() {
   }).catch(() => {});
 }
 
+let soundEnabled = true;
+let soundPostInFlight = false;
+
+function renderSoundToggle() {
+  const btn = document.getElementById('sound-toggle');
+  btn.classList.toggle('on', soundEnabled);
+  btn.classList.toggle('off', !soundEnabled);
+  btn.setAttribute('aria-pressed', String(soundEnabled));
+  btn.innerHTML = soundEnabled ? '&#x1f514; SOUND ON' : '&#x1f515; SOUND OFF';
+}
+
+function loadSettings() {
+  if (soundPostInFlight) return Promise.resolve();
+  return fetch('/api/settings').then(r => r.json()).then(data => {
+    soundEnabled = !!data.sound_enabled;
+    renderSoundToggle();
+  }).catch(() => {});
+}
+
+function toggleSound() {
+  soundEnabled = !soundEnabled;
+  renderSoundToggle();  // optimistic
+  soundPostInFlight = true;
+  fetch('/api/settings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sound_enabled: soundEnabled }),
+  }).then(r => r.json()).then(data => {
+    soundEnabled = !!data.sound_enabled;
+    renderSoundToggle();
+  }).catch(() => {
+    soundEnabled = !soundEnabled;  // revert — daemon unreachable
+    renderSoundToggle();
+  }).finally(() => { soundPostInFlight = false; });
+}
+
 function refresh() {
   loadDevices();
   loadActivity();
+  loadSettings();
 }
 
 updateClock();
