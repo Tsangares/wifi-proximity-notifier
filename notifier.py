@@ -118,7 +118,18 @@ def _clean_type(device_type):
     return device_type
 
 
+def sound_enabled():
+    """Sound on/off, persisted in the DB (toggled via /api/settings or the GNOME extension)."""
+    try:
+        import device_db
+        return device_db.get_setting("sound_enabled", "1") == "1"
+    except Exception:
+        return True
+
+
 def _play_sound(connect=True):
+    if not sound_enabled():
+        return
     sound = _get_sound(connect)
     if sound:
         try:

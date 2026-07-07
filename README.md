@@ -127,6 +127,24 @@ Tradeoff: binding all interfaces means anyone on your LAN can view the device li
 | `/api/devices/<mac>/reprobe` | POST | Queue a device for re-fingerprinting |
 | `/api/activity?limit=50` | GET | Recent activity log |
 | `/api/meta` | GET | Canonical device types and OS values |
+| `/api/settings` | GET/POST | Read or set settings; currently `{"sound_enabled": true|false}` (persisted in the DB) |
+
+## GNOME Shell extension
+
+`gnome-extension/wifi-notifier@tsangares/` adds a top-bar indicator (GNOME 45–50):
+
+- online-device count next to a wifi icon (goes to an "offline" icon if the service is down)
+- a **Notification sounds** switch — flips `sound_enabled` via `/api/settings`, so it also mutes chirps for notifications triggered while the menu is closed
+- **Open Dashboard** — opens `http://127.0.0.1:5555` in your browser
+
+Install:
+
+```bash
+ln -sfn "$(pwd)/gnome-extension/wifi-notifier@tsangares" ~/.local/share/gnome-shell/extensions/wifi-notifier@tsangares
+gnome-extensions enable wifi-notifier@tsangares
+```
+
+On Wayland, log out and back in after installing so GNOME Shell picks up the new extension (on X11, `Alt+F2`, `r` works too).
 
 ## Tuning
 

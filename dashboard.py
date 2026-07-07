@@ -71,6 +71,15 @@ def api_update(mac):
     return jsonify({"ok": True})
 
 
+@app.route("/api/settings", methods=["GET", "POST"])
+def api_settings():
+    if request.method == "POST":
+        data = request.get_json(force=True) or {}
+        if "sound_enabled" in data:
+            device_db.set_setting("sound_enabled", "1" if data["sound_enabled"] else "0")
+    return jsonify({"sound_enabled": device_db.get_setting("sound_enabled", "1") == "1"})
+
+
 @app.route("/api/activity")
 def api_activity():
     limit = request.args.get("limit", 100, type=int)

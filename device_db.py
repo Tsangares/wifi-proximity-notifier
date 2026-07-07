@@ -55,6 +55,10 @@ def _init_tables(conn):
         );
         CREATE INDEX IF NOT EXISTS idx_activity_ts ON activity_log(timestamp DESC);
         CREATE INDEX IF NOT EXISTS idx_activity_mac ON activity_log(mac);
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
     """)
     # Migrate: add columns if missing
     cols = {r[1] for r in conn.execute("PRAGMA table_info(devices)").fetchall()}
@@ -147,6 +151,22 @@ def get_all_devices():
     return [dict(r) for r in conn.execute(
         "SELECT * FROM devices ORDER BY is_active DESC, last_seen DESC"
     ).fetchall()]
+
+
+def get_setting(key, default=""):
+    conn = _get_conn()
+    row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+    return row["value"] if row else default
+
+
+def set_setting(key, value):
+    conn = _get_conn()
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES (?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (key, str(value)),
+    )
+    conn.commit()
 
 
 def rename_device(mac, name):
