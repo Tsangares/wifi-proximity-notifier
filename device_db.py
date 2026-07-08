@@ -83,6 +83,7 @@ def _init_tables(conn):
         ("is_private_mac", "INTEGER DEFAULT 0"),  # locally-administered (randomized) MAC
         ("custom_type", "TEXT DEFAULT ''"),       # user override — sacred
         ("owner", "TEXT DEFAULT ''"),             # user-set owner — sacred
+        ("muted", "INTEGER DEFAULT 0"),           # user-set notify-suppress — sacred
     ]:
         if col not in cols:
             conn.execute(f"ALTER TABLE devices ADD COLUMN {col} {decl}")
@@ -197,6 +198,21 @@ def get_activity_log(limit=100):
     return [dict(r) for r in rows]
 
 
+def get_device_presence(mac, hours=24):
+    """Connect/disconnect events for one device within the last `hours`,
+    oldest first. Client derives online/offline spans from this raw stream
+    (kept simple here — no interval math server-side)."""
+    conn = _get_conn()
+    cutoff = (datetime.now() - timedelta(hours=hours)).isoformat()
+    rows = conn.execute(
+        "SELECT timestamp AS ts, event FROM activity_log "
+        "WHERE mac = ? AND timestamp >= ? AND event IN ('connect', 'disconnect') "
+        "ORDER BY timestamp ASC",
+        (mac, cutoff),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def get_device(mac):
     conn = _get_conn()
     row = conn.execute("SELECT * FROM devices WHERE mac = ?", (mac,)).fetchone()
@@ -246,9 +262,11 @@ def set_identity(mac, display_name, resolved_type, os_guess, manufacturer,
     conn.commit()
 
 
-def update_device_user_fields(mac, name=None, dtype=None, owner=None):
+def update_device_user_fields(mac, name=None, dtype=None, owner=None, muted=None):
     """Set user-controlled fields (pass None to leave a field unchanged;
-    pass '' to explicitly clear an override)."""
+    pass '' to explicitly clear an override). `muted` is a bool/int flag —
+    also user-set and sacred; only this function (and callers of it) ever
+    write it."""
     conn = _get_conn()
     sets, args = [], []
     if name is not None:
@@ -260,6 +278,9 @@ def update_device_user_fields(mac, name=None, dtype=None, owner=None):
     if owner is not None:
         sets.append("owner = ?")
         args.append(owner)
+    if muted is not None:
+        sets.append("muted = ?")
+        args.append(1 if muted else 0)
     if not sets:
         return
     args.append(mac)

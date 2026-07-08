@@ -58,7 +58,11 @@ class TestPassiveConnectIntegration(unittest.TestCase):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def test_passive_reachable_event_creates_and_notifies_new_device(self):
-        mac, ip = "aa:bb:cc:dd:ee:01", "10.0.0.201"
+        # NOTE: first octet must NOT have the locally-administered bit set
+        # (mac & 0x02 on the first byte) — that would make this a private/
+        # randomized MAC and, with no hostname, trip the new-device
+        # notification suppression covered separately below.
+        mac, ip = "10:bb:cc:dd:ee:01", "10.0.0.201"
 
         self.assertIsNone(self.scanner.device_db.get_device(mac))
 
@@ -78,7 +82,7 @@ class TestPassiveConnectIntegration(unittest.TestCase):
         self.assertIn("connect", events)
 
     def test_passive_event_reconnects_inactive_device(self):
-        mac, ip = "aa:bb:cc:dd:ee:02", "10.0.0.202"
+        mac, ip = "10:bb:cc:dd:ee:02", "10.0.0.202"
 
         # First contact: creates the device.
         self.scanner._process_scan_results(
@@ -105,7 +109,7 @@ class TestPassiveConnectIntegration(unittest.TestCase):
     def test_stale_only_event_does_not_reconnect_inactive_device(self):
         """A STALE-state passive line (alive_macs empty) must not resurrect
         an inactive device — mirrors the poller's existing safety check."""
-        mac, ip = "aa:bb:cc:dd:ee:03", "10.0.0.203"
+        mac, ip = "10:bb:cc:dd:ee:03", "10.0.0.203"
         self.scanner._process_scan_results(
             {(mac, ip)}, hostnames={}, alive_macs={mac}, reachable_macs={mac},
         )
@@ -120,6 +124,39 @@ class TestPassiveConnectIntegration(unittest.TestCase):
         device = self.scanner.device_db.get_device(mac)
         self.assertFalse(device["is_active"])
         self.notify_new_device.assert_not_called()
+
+    def test_private_mac_without_identity_does_not_notify(self):
+        """A brand-new randomized/private MAC with no hostname yet looks
+        like a phone that just rotated its MAC — it should be tracked
+        (device row + activity log) but not spam a desktop notification."""
+        mac, ip = "e2:4a:71:b3:f8:10", "10.0.0.210"
+        self.assertTrue(self.scanner.identity.is_private_mac(mac))
+
+        self.scanner._process_scan_results(
+            {(mac, ip)}, hostnames={}, alive_macs={mac}, reachable_macs={mac},
+        )
+
+        device = self.scanner.device_db.get_device(mac)
+        self.assertIsNotNone(device)
+        self.assertTrue(device["is_active"])
+        self.notify_new_device.assert_not_called()
+
+        activity = self.scanner.device_db.get_activity_log(limit=10)
+        events = [a["event"] for a in activity if a["mac"] == mac]
+        self.assertIn("connect", events)
+
+    def test_private_mac_with_hostname_still_notifies(self):
+        """A private MAC that already resolved a hostname (e.g. DHCP/DNS
+        gave it away) is treated as identified and still notifies."""
+        mac, ip = "e2:4a:71:b3:f8:11", "10.0.0.211"
+        self.assertTrue(self.scanner.identity.is_private_mac(mac))
+
+        self.scanner._process_scan_results(
+            {(mac, ip)}, hostnames={mac: "Wils-iPhone"},
+            alive_macs={mac}, reachable_macs={mac},
+        )
+
+        self.notify_new_device.assert_called_once()
 
 
 if __name__ == "__main__":

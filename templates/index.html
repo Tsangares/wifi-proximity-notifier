@@ -184,9 +184,9 @@
     gap: 10px; align-items: center;
     padding: 12px 14px; border-radius: 10px;
     transition: background 0.2s;
-    animation: fadeIn 0.3s ease-out;
     border-left: 3px solid transparent;
   }
+  .device-row.new { animation: fadeIn 0.3s ease-out; }
   .device-row:hover { background: rgba(255, 255, 255, 0.03); }
   .device-row-header {
     padding: 4px 14px 10px; color: #44445a; font-size: 0.68em;
@@ -220,6 +220,19 @@
     position: absolute; top: -3px; right: -3px;
     width: 8px; height: 8px; border-radius: 50%;
     background: #00f0ff; border: 1px solid #0a0a0f;
+  }
+
+  .status-icons-row { display: flex; align-items: center; gap: 6px; }
+  .mute-btn {
+    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 8px; width: 34px; height: 34px; font-size: 14px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; flex-shrink: 0; color: inherit; font-family: inherit;
+    opacity: 0.7; transition: opacity 0.15s, background 0.15s, border-color 0.15s;
+  }
+  .mute-btn:hover { background: rgba(255,255,255,0.1); opacity: 1; }
+  .mute-btn.muted {
+    opacity: 1; border-color: rgba(255,255,255,0.3); background: rgba(255,255,255,0.08);
   }
 
   .status-badge {
@@ -258,6 +271,10 @@
     background: rgba(168, 85, 247, 0.1); color: #c996fb;
     border: 1px dashed rgba(168, 85, 247, 0.4);
   }
+  .badge.muted {
+    background: rgba(255, 255, 255, 0.04); color: #8b8b9e;
+    border: 1px dashed rgba(255, 255, 255, 0.25);
+  }
   .badge-stack { display: flex; gap: 4px; flex-wrap: wrap; }
 
   .device-name-wrap { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
@@ -291,10 +308,15 @@
     border-radius: 6px; font-size: 0.9em; font-family: inherit;
     width: 100%; outline: none; transition: border-color 0.2s, background 0.2s;
   }
-  .editable-name::placeholder { color: #333345; font-weight: 400; }
+  .editable-name::placeholder { color: #55556a; font-weight: 400; }
   .editable-name:hover { border-color: rgba(255, 255, 255, 0.08); }
   .editable-name:focus { border-color: rgba(255, 255, 255, 0.2); background: rgba(255, 255, 255, 0.03); }
   .offline .editable-name { color: #888; }
+  .editable-name.auto { color: #c8c8d8; }
+  .auto-dot {
+    width: 5px; height: 5px; border-radius: 50%; background: transparent;
+    border: 1px solid #55556a; flex-shrink: 0; display: inline-block;
+  }
 
   .editable-owner {
     background: transparent; border: 1px solid transparent;
@@ -423,6 +445,23 @@
     font-size: 0.78em; color: #fff; font-weight: 600;
     margin-top: 6px; padding-top: 6px; border-top: 1px solid rgba(255, 255, 255, 0.06);
   }
+  .presence-section { margin-top: 4px; }
+  .presence-bar-wrap { margin-top: 2px; }
+  .presence-bar {
+    position: relative; height: 22px; border-radius: 6px;
+    background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08);
+    overflow: hidden;
+  }
+  .presence-seg.online {
+    position: absolute; top: 0; bottom: 0;
+    background: rgba(255, 255, 255, 0.55);
+  }
+  .presence-ticks {
+    display: flex; justify-content: space-between;
+    font-size: 0.65em; color: #44445a; margin-top: 4px;
+  }
+  .presence-summary { margin-top: 8px; color: #a0a0b8; }
+
   .btn-reprobe, .btn-diag {
     background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.1);
     color: #8b8b9e; font-size: 0.7em; padding: 4px 12px;
@@ -455,7 +494,7 @@
       display: inline-block; font-size: 0.65em; text-transform: uppercase;
       letter-spacing: 1px; color: #44445a; font-weight: 700; flex-shrink: 0;
     }
-    .type-icon-btn, .btn-diag, .chip, .sort-btn, .sound-toggle { min-height: 40px; }
+    .type-icon-btn, .mute-btn, .btn-diag, .chip, .sort-btn, .sound-toggle { min-height: 40px; }
     .header { flex-wrap: wrap; }
     .editable-name, .editable-owner, .type-select, .search-input { min-height: 40px; }
     .device-name-wrap { width: 100%; }
@@ -554,11 +593,12 @@ let deviceByMac = {};
 let metaTypes = ['phone','tablet','laptop','desktop','tv','console','iot','network','printer','speaker','watch','camera','unknown'];
 let currentFilter = 'all';
 let searchQuery = '';
-let sortState = { key: 'last_seen', dir: 'desc' };
+let sortState = { key: 'status', dir: 'desc' };
 let openPanel = null; // { mac, type: 'identity' | 'fingerprint' }
 let lastActivityIds = '';
 
 const SORT_OPTIONS = [
+  { key: 'status', label: 'Status', defaultDir: 'desc' },
   { key: 'last_seen', label: 'Last seen', defaultDir: 'desc' },
   { key: 'name', label: 'Name', defaultDir: 'asc' },
   { key: 'first_seen', label: 'First seen', defaultDir: 'desc' },
@@ -649,6 +689,7 @@ function computeKey(d) {
     d.mac, d.is_active ? 1 : 0, d.name, d.type, d.owner || '', d.ip || '',
     d.os_guess || '', d.manufacturer || '', d.is_new ? 1 : 0, d.is_private_mac ? 1 : 0,
     d.custom_name ? 1 : 0, d.custom_type ? 1 : 0, d.hostname || '',
+    needsLabeling(d) ? 1 : 0, d.muted ? 1 : 0,
   ].join('|');
 }
 
@@ -663,33 +704,54 @@ function rowHtml(d, key) {
   ];
   if (d.is_new) badges.push('<span class="badge new">NEW</span>');
   if (d.is_private_mac) badges.push('<span class="badge private">PRIVATE MAC</span>');
+  if (d.muted) badges.push('<span class="badge muted">MUTED</span>');
 
-  const youDot = d.custom_name ? '<span class="you-dot" title="Set by you"></span>' : '';
-  const nameVal = escapeHtml(d.custom_name || '');
-  const placeholder = escapeHtml(d.name || d.mac);
+  const needsLabel = needsLabeling(d);
+  let nameVal, nameCls, cueDot, placeholder;
+  if (d.custom_name) {
+    nameVal = escapeHtml(d.custom_name); nameCls = 'editable-name';
+    cueDot = '<span class="you-dot" title="Set by you"></span>'; placeholder = '';
+  } else if (!needsLabel) {
+    nameVal = escapeHtml(d.name); nameCls = 'editable-name auto';
+    cueDot = '<span class="auto-dot" title="Auto-detected name — click to rename"></span>'; placeholder = '';
+  } else {
+    nameVal = ''; nameCls = 'editable-name'; cueDot = '';
+    placeholder = 'name this device';
+  }
+
+  const primaryShown = d.custom_name || (!needsLabel ? d.name : '');
+  const secondaryHtml = (d.hostname && d.hostname !== primaryShown) ? escapeHtml(d.hostname) : '';
 
   const osLine = d.os_guess ? `<div class="device-os">${escapeHtml(d.os_guess)}</div>` : '';
 
   const ownerVal = escapeHtml(d.owner || '');
 
+  const muteIcon = d.muted ? '\u{1F515}' : '\u{1F514}';
+  const muteTitle = d.muted ? 'Unmute notifications for this device' : 'Mute notifications for this device';
+
   return `<div class="device-row ${statusCls}" data-mac="${escapeHtml(d.mac)}" data-key="${escapeHtml(key)}">
     <div class="cell cell-status">
-      <button type="button" class="type-icon-btn" title="${hasIdentity ? 'Click for identification details' : 'No identity data yet'}" onclick="toggleIdentity('${d.mac}')">
-        ${icon}${hasIdentity ? '<span class="info-dot"></span>' : ''}
-      </button>
+      <div class="status-icons-row">
+        <button type="button" class="type-icon-btn" title="${hasIdentity ? 'Click for identification details' : 'No identity data yet'}" onclick="toggleIdentity('${d.mac}')">
+          ${icon}${hasIdentity ? '<span class="info-dot"></span>' : ''}
+        </button>
+        <button type="button" class="mute-btn ${d.muted ? 'muted' : ''}" title="${muteTitle}"
+                aria-pressed="${d.muted ? 'true' : 'false'}"
+                onclick="toggleMute('${d.mac}', ${d.muted ? 'false' : 'true'})">${muteIcon}</button>
+      </div>
       <div class="badge-stack">${badges.join('')}</div>
     </div>
     <div class="cell cell-name">
       <div class="device-name-wrap">
         <div class="name-line">
-          ${youDot}
-          <input class="editable-name" value="${nameVal}" placeholder="${placeholder}"
+          ${cueDot}
+          <input class="${nameCls}" value="${nameVal}" placeholder="${escapeHtml(placeholder)}"
                  data-mac="${escapeHtml(d.mac)}" data-field="name"
                  onchange="updateField(this.dataset.mac,'name',this.value)"
                  onfocus="this.select()"
                  onkeydown="if(event.key==='Enter') this.blur()">
         </div>
-        <div class="device-secondary">${escapeHtml(d.hostname || '')}</div>
+        <div class="device-secondary">${secondaryHtml}</div>
       </div>
     </div>
     <div class="cell cell-type" data-label="Type">
@@ -759,19 +821,34 @@ function renderList(container, devices) {
       const tmp = document.createElement('div');
       tmp.innerHTML = rowHtml(d, key);
       row = tmp.firstElementChild;
-      row.style.animation = 'fadeIn 0.3s ease-out';
+      row.classList.add('new');
+      row.addEventListener('animationend', () => row.classList.remove('new'), { once: true });
       container.appendChild(row);
       existing[d.mac] = row;
     }
   });
 
-  // Reorder to match sorted order, keeping each row's detail panel (if open) directly after it
+  // Reorder to match sorted order with minimal DOM moves, keeping each row's detail
+  // panel (if open) directly after it, and never relocating a focused/open row.
+  const desired = [];
   devices.forEach(d => {
     const row = existing[d.mac];
     if (!row) return;
-    container.appendChild(row);
-    if (detailFor[d.mac]) container.appendChild(detailFor[d.mac]);
+    desired.push(row);
+    if (detailFor[d.mac]) desired.push(detailFor[d.mac]);
   });
+  const desiredSet = new Set(desired);
+  const kids = container.children;
+  let idx = 0;
+  for (const node of desired) {
+    while (kids[idx] && !desiredSet.has(kids[idx])) idx++;   // skip stale/fading nodes
+    if (kids[idx] === node) { idx++; continue; }             // already in place
+    const pinned = node.contains(document.activeElement) ||
+                   (openPanel && openPanel.mac === node.dataset.mac);
+    if (pinned) continue;                                    // never move a focused/open row
+    container.insertBefore(node, kids[idx] || null);
+    idx++;
+  }
 
   // Remove stale rows (and their detail panels)
   Object.keys(existing).forEach(mac => {
@@ -806,9 +883,13 @@ function closeOpenPanel() {
 }
 
 function identityPanelHtml(d) {
+  const presenceSection = `<div class="presence-section">
+      <div class="detail-title" style="margin-top:14px;margin-bottom:8px;">Presence &mdash; last 24h</div>
+      <div class="probe-item dim">Loading&hellip;</div>
+    </div>`;
   if (!d.identity) {
     return `<div class="detail-title">Identification &mdash; ${escapeHtml(d.name)}</div>
-      <div class="probe-item dim">No identity data yet for this device.</div>`;
+      <div class="probe-item dim">No identity data yet for this device.</div>` + presenceSection;
   }
   const skipKeys = new Set(['is_private_mac', 'engine_version']);
   const rows = Object.entries(d.identity)
@@ -822,7 +903,7 @@ function identityPanelHtml(d) {
       </div>`;
     }).join('');
   return `<div class="detail-title">Identification &mdash; ${escapeHtml(d.name)}</div>
-    <div class="identity-fields">${rows || '<div class="probe-item dim">No per-field data.</div>'}</div>`;
+    <div class="identity-fields">${rows || '<div class="probe-item dim">No per-field data.</div>'}</div>` + presenceSection;
 }
 
 function toggleIdentity(mac) {
@@ -839,6 +920,93 @@ function toggleIdentity(mac) {
     `<div style="margin-top:12px;"><button class="btn-diag" onclick="toggleFingerprint('${mac}')">Run network diagnostics &rarr;</button></div>`;
   row.insertAdjacentElement('afterend', panel);
   openPanel = { mac, type: 'identity' };
+  loadPresence(mac, panel);
+}
+
+// ---------------------------------------------------------------------
+// Presence-history strip (last 24h), lazily loaded into the identity panel
+// ---------------------------------------------------------------------
+function loadPresence(mac, panel) {
+  fetch('/api/devices/' + encodeURIComponent(mac) + '/presence?hours=24')
+    .then(r => r.json())
+    .then(data => renderPresenceStrip(panel, data))
+    .catch(() => {
+      if (!panel.isConnected) return;
+      const sec = panel.querySelector('.presence-section');
+      if (sec) {
+        sec.innerHTML = '<div class="detail-title" style="margin-top:14px;margin-bottom:8px;">Presence &mdash; last 24h</div>' +
+          '<div class="probe-item dim">Failed to load presence history.</div>';
+      }
+    });
+}
+
+function formatDuration(ms) {
+  const totalMin = Math.max(0, Math.round(ms / 60000));
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  if (h === 0) return m + 'm';
+  return h + 'h' + (m ? ' ' + m + 'm' : '');
+}
+
+// Turns a chronological connect/disconnect event stream into online/offline
+// spans covering [now - hours, now]. State before the first event is inferred:
+// a leading 'disconnect' implies online-since-window-start; a leading
+// 'connect' implies offline-since-window-start; no events at all falls back
+// to the device's current is_active flag.
+function computePresenceSegments(events, hours, isActive) {
+  const now = Date.now();
+  const windowStart = now - hours * 3600 * 1000;
+  const segments = [];
+  let state = events.length ? (events[0].event === 'disconnect') : !!isActive;
+  let cursor = windowStart;
+  events.forEach(e => {
+    const t = new Date(e.ts).getTime();
+    const clamped = Math.min(Math.max(t, windowStart), now);
+    if (clamped > cursor) {
+      segments.push({ start: cursor, end: clamped, online: state });
+    }
+    state = e.event === 'connect';
+    cursor = clamped;
+  });
+  if (cursor < now) segments.push({ start: cursor, end: now, online: state });
+  return segments;
+}
+
+function renderPresenceStrip(panel, data) {
+  if (!panel.isConnected) return;
+  const sec = panel.querySelector('.presence-section');
+  if (!sec) return;
+
+  const hours = data.hours || 24;
+  const events = data.events || [];
+  const now = Date.now();
+  const windowStart = now - hours * 3600 * 1000;
+  const totalMs = now - windowStart;
+  const segments = computePresenceSegments(events, hours, data.is_active);
+  const onlineMs = segments.filter(s => s.online).reduce((sum, s) => sum + (s.end - s.start), 0);
+  const pct = totalMs > 0 ? Math.round((onlineMs / totalMs) * 100) : 0;
+
+  const barHtml = segments.filter(s => s.online).map(s => {
+    const leftPct = ((s.start - windowStart) / totalMs) * 100;
+    const widthPct = Math.max(((s.end - s.start) / totalMs) * 100, 0.3);
+    const startStr = fmtExact(new Date(s.start).toISOString());
+    const endStr = fmtExact(new Date(s.end).toISOString());
+    return `<div class="presence-seg online" style="left:${leftPct}%;width:${widthPct}%" title="Online ${startStr} &ndash; ${endStr}"></div>`;
+  }).join('');
+
+  const summary = `Online ${formatDuration(onlineMs)} of last ${hours}h (${pct}%)` +
+    (data.is_active ? ' &middot; currently online' : ' &middot; currently offline');
+
+  sec.innerHTML = `
+    <div class="detail-title" style="margin-top:14px;margin-bottom:8px;">Presence &mdash; last ${hours}h</div>
+    <div class="presence-bar-wrap">
+      <div class="presence-bar">${barHtml}</div>
+      <div class="presence-ticks">
+        <span>-${hours}h</span><span>-${Math.round(hours / 2)}h</span><span>now</span>
+      </div>
+    </div>
+    <div class="presence-summary probe-item">${events.length ? summary : summary + ' &middot; no events recorded in window'}</div>
+  `;
 }
 
 function toggleFingerprint(mac) {
@@ -981,27 +1149,54 @@ function updateField(mac, field, value) {
   }).catch(err => console.error('update error', err));
 }
 
+function toggleMute(mac, next) {
+  fetch('/api/devices/' + encodeURIComponent(mac) + '/update', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ muted: next }),
+  }).then(r => r.json()).then(resp => {
+    if (!resp.ok) console.error('mute update failed for', mac, resp);
+    loadDevices();
+  }).catch(err => console.error('mute update error', err));
+}
+
 // ---------------------------------------------------------------------
 // Filters, search, sort controls
 // ---------------------------------------------------------------------
 function renderChips(counts) {
   const row = document.getElementById('chip-row');
-  row.innerHTML = FILTER_OPTIONS.map(opt => {
-    const active = opt.key === currentFilter ? ' active' : '';
-    return `<div class="chip${active}" data-filter="${opt.key}" onclick="setFilter('${opt.key}')">
-      ${opt.label} <span class="chip-count">${counts[opt.key]}</span>
-    </div>`;
-  }).join('');
+  if (!row.dataset.built) {
+    row.innerHTML = FILTER_OPTIONS.map(opt =>
+      `<div class="chip" data-filter="${opt.key}" onclick="setFilter('${opt.key}')">
+        ${opt.label} <span class="chip-count">0</span>
+      </div>`
+    ).join('');
+    row.dataset.built = '1';
+  }
+  row.querySelectorAll(':scope > .chip').forEach(chip => {
+    const key = chip.dataset.filter;
+    chip.classList.toggle('active', key === currentFilter);
+    const countEl = chip.querySelector('.chip-count');
+    if (countEl) countEl.textContent = counts[key];
+  });
 }
 
 function renderSortButtons() {
   const row = document.getElementById('sort-row');
-  const buttons = SORT_OPTIONS.map(opt => {
-    const active = opt.key === sortState.key;
-    const arrow = active ? (sortState.dir === 'asc' ? ' &#9650;' : ' &#9660;') : '';
-    return `<button type="button" class="sort-btn${active ? ' active' : ''}" onclick="setSort('${opt.key}')">${opt.label}${arrow}</button>`;
-  }).join('');
-  row.innerHTML = '<span class="sort-label">Sort</span>' + buttons;
+  if (!row.dataset.built) {
+    const buttons = SORT_OPTIONS.map(opt =>
+      `<button type="button" class="sort-btn" data-sort="${opt.key}" onclick="setSort('${opt.key}')">${opt.label}<span class="sort-arrow"></span></button>`
+    ).join('');
+    row.innerHTML = '<span class="sort-label">Sort</span>' + buttons;
+    row.dataset.built = '1';
+  }
+  row.querySelectorAll(':scope > .sort-btn').forEach(btn => {
+    const key = btn.dataset.sort;
+    const active = key === sortState.key;
+    btn.classList.toggle('active', active);
+    const arrowEl = btn.querySelector('.sort-arrow');
+    if (arrowEl) arrowEl.innerHTML = active ? (sortState.dir === 'asc' ? ' &#9650;' : ' &#9660;') : '';
+  });
 }
 
 function setFilter(key) {
@@ -1030,17 +1225,31 @@ function matchesSearch(d) {
   return hay.includes(searchQuery);
 }
 
+function needsLabeling(d) {
+  if (d.custom_name) return false;
+  const dn = d.identity && d.identity.display_name;
+  if (dn && (dn.confidence || 0) >= 0.7) return false;
+  if (!d.identity && d.hostname) return false;
+  return true;
+}
+
 function matchesFilter(d) {
   switch (currentFilter) {
     case 'online': return !!d.is_active;
     case 'new': return !!d.is_new;
-    case 'needs': return !d.custom_name;
+    case 'needs': return needsLabeling(d);
     case 'private': return !!d.is_private_mac;
     default: return true;
   }
 }
 
 function compareDevices(a, b) {
+  if (sortState.key === 'status') {
+    const act = (b.is_active ? 1 : 0) - (a.is_active ? 1 : 0); // online first
+    if (act !== 0) return act;
+    const nm = (a.name || '').localeCompare(b.name || '');
+    return nm !== 0 ? nm : a.mac.localeCompare(b.mac);
+  }
   let cmp = 0;
   switch (sortState.key) {
     case 'name':
@@ -1099,7 +1308,10 @@ function renderActivity(items) {
     }
     html += activityItemHtml(a);
   });
-  document.getElementById('activity-feed').innerHTML = html || '<div class="empty">No activity yet</div>';
+  const feed = document.getElementById('activity-feed');
+  const prevTop = feed.scrollTop;
+  feed.innerHTML = html || '<div class="empty">No activity yet</div>';
+  feed.scrollTop = prevTop;
 }
 
 // ---------------------------------------------------------------------
@@ -1110,7 +1322,7 @@ function render() {
     all: allDevices.length,
     online: allDevices.filter(d => d.is_active).length,
     new: allDevices.filter(d => d.is_new).length,
-    needs: allDevices.filter(d => !d.custom_name).length,
+    needs: allDevices.filter(needsLabeling).length,
     private: allDevices.filter(d => d.is_private_mac).length,
   };
 
@@ -1128,10 +1340,7 @@ function render() {
 
   const phones = allDevices
     .filter(d => d.is_active && PERSONAL_TYPES.includes(d.type))
-    .sort((a, b) => {
-      const cmp = new Date(b.last_seen || 0) - new Date(a.last_seen || 0);
-      return cmp !== 0 ? cmp : a.mac.localeCompare(b.mac);
-    });
+    .sort((a, b) => (a.name || '').localeCompare(b.name || '') || a.mac.localeCompare(b.mac));
   document.getElementById('phones-badge').textContent = phones.length;
   const phonesCard = document.getElementById('phones-card');
   phonesCard.classList.toggle('empty-hide', phones.length === 0);

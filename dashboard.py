@@ -58,6 +58,7 @@ def api_update(mac):
     name = data.get("name")
     dtype = data.get("type")
     owner = data.get("owner")
+    muted = data.get("muted")
 
     if dtype is not None and dtype != "" and dtype not in canonical_types:
         return jsonify({"ok": False, "error": "invalid type"}), 400
@@ -67,8 +68,26 @@ def api_update(mac):
     if owner is not None:
         owner = owner.strip()
 
-    device_db.update_device_user_fields(mac, name=name, dtype=dtype, owner=owner)
+    device_db.update_device_user_fields(
+        mac, name=name, dtype=dtype, owner=owner,
+        muted=(bool(muted) if muted is not None else None),
+    )
     return jsonify({"ok": True})
+
+
+@app.route("/api/devices/<mac>/presence")
+def api_presence(mac):
+    hours = request.args.get("hours", 24, type=int)
+    device = device_db.get_device(mac)
+    if not device:
+        return jsonify({"error": "not found"}), 404
+    events = device_db.get_device_presence(mac, hours=hours)
+    return jsonify({
+        "mac": mac,
+        "hours": hours,
+        "events": events,
+        "is_active": bool(device.get("is_active")),
+    })
 
 
 @app.route("/api/settings", methods=["GET", "POST"])
