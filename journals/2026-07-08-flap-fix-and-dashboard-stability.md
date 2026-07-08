@@ -186,10 +186,38 @@ new-device suppression. All green. The mute + presence endpoints were verified
 in-process via Flask's test client (11/11 checks), which also neatly sidesteps a
 sandbox that blocks binding a real port.
 
+## How it was built (process note)
+
+Worth recording because it worked well: the work was decomposed into three
+**file-disjoint** streams — scanner/notifications, dashboard, and release infra
+— and handed to parallel coding agents running concurrently, with every diff
+reviewed before acceptance. Disjoint file sets meant no git contention despite
+running at the same time. The dashboard itself was split into two sequential
+waves (flicker/name-visibility first, then the mute + presence features) because
+both touch the one big template file. A couple of review catches mattered: a
+test was incidentally using a locally-administered (`aa:`) MAC for a
+"generic new device" case, which the new private-MAC suppression would have
+broken — fixed by moving it to a non-private prefix and adding explicit
+suppression tests instead of weakening the assertion.
+
+One environment wrinkle: this sandbox blocks binding a real TCP port, so the
+usual `app.py --mock` smoke test wouldn't start. Flask's in-process
+`test_client()` dispatches requests without a socket, which sidestepped it
+entirely and verified the mute + presence endpoints (11/11 checks).
+
+## Shipping
+
+Landed on branch `flap-fix-and-dashboard-stability`, PR #1. **CI is green across
+Python 3.11 / 3.12 / 3.13** — and notably it ran clean in a bare CI container
+(no root, no `arp-scan`/`nmap`/`ip` present), which is the real proof the suite
+is genuinely offline. GitGuardian's secret scan passed too, an independent check
+that the tailnet-IP redaction was complete. Test count went 69 → 100.
+
 ## Versions / tools
 
 Arch Linux, kernel 7.0.x; Python 3.14 (local venv) with the CI matrix targeting
-3.11–3.13; `arp-scan`, `nmap`, `iputils`/`arping`; Flask; systemd + journalctl.
+3.11–3.13; `arp-scan`, `nmap`, `iputils`/`arping`; Flask 3.1; systemd +
+journalctl; GitHub Actions (CI) via the `gh` CLI; `node --check` for JS syntax.
 
 ## Open items
 
