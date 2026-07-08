@@ -12,11 +12,15 @@ log = logging.getLogger(__name__)
 
 def arping_check(ip):
     """Single ARP probe — layer 2, works even on sleeping devices.
-    300ms deadline — ARP responses are sub-millisecond on LAN."""
+    1s deadline — a normal ARP response is sub-millisecond on LAN, but
+    power-saving phones/tablets can take noticeably longer to wake their
+    radio and answer, so a too-tight deadline (previously 300ms) makes a
+    merely-sleeping device look gone. The overall subprocess timeout has
+    matching headroom above the arping deadline."""
     try:
         result = subprocess.run(
-            ["arping", "-c", "1", "-W", "0.3", ip],
-            capture_output=True, timeout=2,
+            ["arping", "-c", "1", "-W", "1", ip],
+            capture_output=True, timeout=3,
         )
         return result.returncode == 0
     except Exception:

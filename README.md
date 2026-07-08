@@ -6,6 +6,7 @@ A daemon that watches your local network and tells you when devices show up or l
 
 ![Python](https://img.shields.io/badge/python-3.10+-green)
 ![License](https://img.shields.io/badge/license-MIT-gray)
+![Tests](https://github.com/Tsangares/wifi-proximity-notifier/actions/workflows/tests.yml/badge.svg)
 
 ## How it works
 
@@ -103,16 +104,16 @@ python3 app.py --mock
 
 Open `http://localhost:5555`.
 
-A router-style device list: every device shows its type icon, name, ONLINE/OFFLINE state, IP, MAC (with a PRIVATE MAC badge for randomized addresses), manufacturer, OS, first/last seen, and connection count. Filter chips (Online / New / Needs labeling / Private MAC), free-text search, and sorting. Click a name to rename it; set a canonical type or an owner inline — your edits are sacred and survive every rescan. The "Needs labeling" view queues up devices you haven't named yet. Clicking a device's type icon shows *why* it was identified that way (per-field source and confidence). The activity timeline shows connects and disconnects grouped by day.
+A router-style device list: every device shows its type icon, name, ONLINE/OFFLINE state, IP, MAC (with a PRIVATE MAC badge for randomized addresses), manufacturer, OS, first/last seen, and connection count. Filter chips (Online / New / Needs labeling / Private MAC), free-text search, and sorting (defaulting to a stable online-first order so rows don't reshuffle as you read). Devices that advertise a real name — a hostname or mDNS name — show it prominently even before you rename them, marked as auto-detected, so only genuinely anonymous devices land in "Needs labeling". Click a name to rename it; set a canonical type or an owner inline — your edits are sacred and survive every rescan. A per-device mute toggle (🔕) silences notifications for a chatty device, and opening a device reveals a 24-hour presence-history strip. Clicking a device's type icon shows *why* it was identified that way (per-field source and confidence). The activity timeline shows connects and disconnects grouped by day.
 
-The UI uses text labels (ONLINE/OFFLINE, JOINED/LEFT), solid vs dashed borders, distinct shapes, and brightness differences instead of relying on color alone. It refreshes every 5 seconds without page flicker (DOM diffing) and collapses to stacked cards on a phone screen.
+The UI uses text labels (ONLINE/OFFLINE, JOINED/LEFT), solid vs dashed borders, distinct shapes, and brightness differences instead of relying on color alone. It refreshes every 5 seconds without reshuffling rows or flickering — a stable sort plus minimal-move DOM diffing updates only genuinely-changed rows, and a row you're editing is never rebuilt or moved — and it collapses to stacked cards on a phone screen.
 
 ### Access from other devices (LAN / Tailscale)
 
 The dashboard binds to `0.0.0.0` by default, so it's reachable from your home LAN and, if the machine runs Tailscale, from your tailnet:
 
-- from a phone on the tailnet with MagicDNS: `http://taxi:5555`
-- or by Tailscale IP: `http://100.83.247.91:5555`
+- from a phone on the tailnet with MagicDNS: `http://<your-machine-name>:5555`
+- or by Tailscale IP: `http://<your-tailscale-ip>:5555`
 
 Tradeoff: binding all interfaces means anyone on your LAN can view the device list (it exposes MACs, IPs, and names — but no control over your network). There is no auth yet; `dashboard.py` has a single `before_request` hook where a bearer-token check can be added later. To restrict access, set `WIFI_NOTIFIER_HOST=127.0.0.1` (or pass `--host`) in the service environment.
 
@@ -122,9 +123,10 @@ Tradeoff: binding all interfaces means anyone on your LAN can view the device li
 |----------|--------|-------------|
 | `/api/devices` | GET | `{"devices": [...]}` — all devices with resolved identity, confidence/provenance, connection counts |
 | `/api/devices/<mac>/rename` | POST | Rename a device `{"name": "My Phone"}` |
-| `/api/devices/<mac>/update` | POST | Set user fields `{"name": ..., "type": ..., "owner": ...}` (type must be canonical, or `""` to clear the override) |
+| `/api/devices/<mac>/update` | POST | Set user fields `{"name": ..., "type": ..., "owner": ..., "muted": true\|false}` (type must be canonical, or `""` to clear the override; `muted` suppresses notifications for that device) |
 | `/api/devices/<mac>/fingerprint` | GET | Raw deep-probe evidence for a device |
 | `/api/devices/<mac>/reprobe` | POST | Queue a device for re-fingerprinting |
+| `/api/devices/<mac>/presence?hours=24` | GET | Connect/disconnect events for the last N hours — powers the presence-history strip |
 | `/api/activity?limit=50` | GET | Recent activity log |
 | `/api/meta` | GET | Canonical device types and OS values |
 | `/api/settings` | GET/POST | Read or set settings; currently `{"sound_enabled": true|false}` (persisted in the DB) |
@@ -154,9 +156,24 @@ Edit the timing constants at the top of `scanner.py`:
 FAST_SCAN_INTERVAL = 10      # seconds between fallback/reconcile ARP sweeps (connect detection is mostly passive)
 DETAIL_SCAN_INTERVAL = 30    # seconds between nmap hostname sweeps
 DISCONNECT_PROBE_COUNT = 5   # failed arping probes before declaring gone
-DISCONNECT_PROBE_SLEEP = 0.3 # seconds between probes
+DISCONNECT_PROBE_SLEEP = 3   # seconds between probes (~15s total — gives power-saving phones time to answer)
 RECONNECT_GRACE = 90         # suppress re-notification if gone < this long
+
+# Type-aware grace before we start probing for a disconnect. Phones/tablets
+# power-save and stop answering ARP for minutes, so they get a longer grace
+# than always-on devices — this is what stops sleeping devices from flapping.
+TYPE_TIMEOUTS = {            # type keyword -> (absent_timeout, stale_timeout) seconds
+    "phone": (300, 150), "tablet": (300, 150), "watch": (300, 150), "laptop": (180, 90),
+}                            # everything else uses ABSENT_TIMEOUT=120 / STALE_TIMEOUT=60
+
+# Chronic-flap suppression: a device that disconnects this many times within
+# the window is muted (both "left" and "rejoined") until it settles down.
+CHRONIC_FLAP_WINDOW = 3600   # seconds (1 hour)
+CHRONIC_FLAP_THRESHOLD = 3
 ```
+
+For per-device control, the 🔕 mute toggle on any dashboard device row silences
+that device's notifications outright, regardless of the timers above.
 
 Dashboard bind address/port: `--host`/`--port` flags or `WIFI_NOTIFIER_HOST`/`WIFI_NOTIFIER_PORT` env vars.
 
